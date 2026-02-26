@@ -377,8 +377,13 @@ function showKeyModal(){
 }
 window.addEventListener('load',()=>{if(!K)showKeyModal();});
 
-const PROMPT=`Sos un motor de OCR especializado en licencias de conducir de cualquier país (Argentina, México, Brasil, Chile, Colombia, España, Estados Unidos y otros).
-PRIMERO: determiná si la imagen es una licencia de conducir (de cualquier país). Si NO lo es (ej: DNI, pasaporte, credencial INE, tarjeta de crédito, factura, foto u otro documento), devolvé ÚNICAMENTE este JSON:
+const PROMPT=`Sos un motor de OCR especializado en licencias de conducir de CUALQUIER PAÍS del mundo.
+Una licencia de conducir puede ser de Argentina, México, Brasil, Chile, Colombia, España, Estados Unidos, Uruguay, Paraguay, Bolivia u otros países. El frente O el dorso de una licencia son documentos válidos.
+
+REGLA CRÍTICA: Solo devolvé NOT_A_LICENSE si el documento es claramente algo distinto a una licencia de conducir, como: DNI sin licencia, pasaporte, credencial de elector/INE, tarjeta bancaria, factura, foto personal, o cualquier otro documento que NO sea una licencia de conducir.
+Si el documento ES una licencia de conducir de cualquier país (aunque sea el dorso, aunque esté en mal estado, aunque sea difícil de leer), procesala normalmente.
+
+Si NO es una licencia de conducir, devolvé ÚNICAMENTE este JSON:
 {"validation":{"status":"NOT_A_LICENSE","document_detected":"[tipo de documento detectado]","alerts":["El documento enviado no es una licencia de conducir. Por favor subí el frente de la licencia de conducir."]}}
 
 Si SÍ es una licencia de conducir, analizá la(s) imagen(s) adjuntas (frente y/o dorso) y extraé todos los campos visibles.
