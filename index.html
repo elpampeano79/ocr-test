@@ -67,6 +67,10 @@ main{max-width:860px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
 .fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.85rem}
 .fi{background:var(--s2);border:1px solid var(--bd);border-radius:12px;padding:.85rem 1rem;opacity:0;transform:translateY(8px);transition:all .35s ease}
 .fi.show{opacity:1;transform:translateY(0)}
+.fi.low-conf{border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.06)}
+.fi.very-low-conf{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.06)}
+.slow-fields{font-size:.78rem;margin-top:.4rem;color:var(--y);display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.slow-tag{background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:.1rem .45rem;font-weight:700;font-size:.72rem}
 .fl{font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--tm);margin-bottom:.35rem}
 .fv{font-size:.92rem;font-weight:600}
 .fv.mo{font-family:'Courier New',monospace;font-size:.83rem;color:var(--c)}
@@ -298,7 +302,17 @@ function showResults(d){
     sd.textContent='Licencia vencida — renovación requerida';
   }else if(status.includes('REVIEW')||status.includes('REVIS')){
     sb.classList.add('w');se.textContent='⚠️';st.textContent='REQUIERE REVISIÓN';
-    sd.textContent='Revisión manual recomendada';
+    const fc2=d.validation?.field_confidence||{};
+    const LABELS={'license_number':'Nº Licencia','curp':'CURP','expiry_date':'F. Vencimiento','issue_date':'F. Expedición','given_names':'Nombre','last_name_paternal':'Ap. Paterno','date_of_birth':'F. Nacimiento','id_number':'DNI/ID','license_category':'Categoría','blood_type':'Tipo Sangre'};
+    const lowFields=Object.entries(fc2).filter(([,v])=>v<0.85).map(([k])=>LABELS[k]||k);
+    const alerts=d.validation?.alerts||[];
+    if(lowFields.length>0){
+      sd.innerHTML='Confianza baja en: <span class="slow-fields">'+lowFields.map(n=>'<span class="slow-tag">'+n+'</span>').join('')+'</span>';
+    } else if(alerts.length>0){
+      sd.textContent=alerts[0];
+    } else {
+      sd.textContent='Revisión manual recomendada';
+    }
   }else{
     sb.classList.add('v');se.textContent='✅';st.textContent='VIGENTE';
     const exp=d.license?.expiry_date;
@@ -311,6 +325,8 @@ function showResults(d){
   fields(d).forEach((f,i)=>{
     const el=document.createElement('div'); el.className='fi';
     const cv=fc[f.key]; const dc=!cv?'':cv>=.9?'da':cv>=.75?'dm':'db';
+    if(cv&&cv<0.75) el.classList.add('very-low-conf');
+    else if(cv&&cv<0.85) el.classList.add('low-conf');
     el.innerHTML='<div class="fl">'+f.label+'</div><div class="fv'+(f.mo?' mo':'')+'">'+f.val+(dc?'<span class="cdot '+dc+'"></span>':'')+'</div>';
     fg.appendChild(el);
     setTimeout(()=>el.classList.add('show'),50+i*50);
