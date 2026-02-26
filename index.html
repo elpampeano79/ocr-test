@@ -190,9 +190,9 @@ async function run(){
   let pct=0;
   const ticker=setInterval(()=>{pct=Math.min(pct+(pct<50?4:pct<80?2:0.5),92);fill.style.width=pct+'%';},300);
 
-  // Updating badge (only if panel already visible)
+  // Updating badge (only if panel already visible AND there's a dorso image)
   const panel=document.getElementById('panel');
-  if(panel.classList.contains('on')) document.getElementById('updr').classList.add('on');
+  if(panel.classList.contains('on') && S.b) document.getElementById('updr').classList.add('on');
 
   document.getElementById('errbox').style.display='none';
 
