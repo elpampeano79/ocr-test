@@ -323,12 +323,15 @@ function fields(d){
     {key:'given_names',label:'Nombre(s)',val:h.given_names},
     {key:'last_name_paternal',label:'Ap. Paterno',val:h.last_name_paternal},
     {key:'last_name_maternal',label:'Ap. Materno',val:h.last_name_maternal},
+    {key:'id_number',label:'DNI / ID',val:h.id_number,mo:true},
     {key:'curp',label:'CURP',val:h.curp,mo:true},
     {key:'date_of_birth',label:'Fecha Nacimiento',val:h.date_of_birth},
     {key:'sex',label:'Sexo',val:h.sex},
     {key:'blood_type',label:'Tipo de Sangre',val:h.blood_type},
-    {key:'license_type',label:'Tipo Licencia',val:l.license_type},
+    {key:'country',label:'País Emisor',val:iss.country},
     {key:'license_number',label:'Número Licencia',val:l.license_number,mo:true},
+    {key:'license_type',label:'Tipo Licencia',val:l.license_type},
+    {key:'license_category',label:'Categoría',val:l.license_category},
     {key:'vehicles_authorized',label:'Vehículo Autorizado',val:l.vehicles_authorized},
     {key:'issue_date',label:'F. Expedición',val:l.issue_date},
     {key:'expiry_date',label:'F. Vencimiento',val:l.expiry_date||(l.is_permanent?'PERMANENTE':null)},
@@ -374,14 +377,19 @@ function showKeyModal(){
 }
 window.addEventListener('load',()=>{if(!K)showKeyModal();});
 
-const PROMPT=`Sos un motor de OCR especializado en licencias de conducir mexicanas.
-PRIMERO: determiná si la imagen es una licencia de conducir mexicana. Si NO lo es (ej: DNI, pasaporte, credencial INE, tarjeta de crédito, factura, foto u otro documento), devolvé ÚNICAMENTE este JSON:
+const PROMPT=`Sos un motor de OCR especializado en licencias de conducir de cualquier país (Argentina, México, Brasil, Chile, Colombia, España, Estados Unidos y otros).
+PRIMERO: determiná si la imagen es una licencia de conducir (de cualquier país). Si NO lo es (ej: DNI, pasaporte, credencial INE, tarjeta de crédito, factura, foto u otro documento), devolvé ÚNICAMENTE este JSON:
 {"validation":{"status":"NOT_A_LICENSE","document_detected":"[tipo de documento detectado]","alerts":["El documento enviado no es una licencia de conducir. Por favor subí el frente de la licencia de conducir."]}}
 
 Si SÍ es una licencia de conducir, analizá la(s) imagen(s) adjuntas (frente y/o dorso) y extraé todos los campos visibles.
+Adaptá la extracción al formato del país detectado:
+- Argentina: DNI del titular, categoría (A/B/C/D/E/F/G), CUIL/CUIT si aparece, provincia emisora, clase de vehículo habilitado
+- México: CURP, número de licencia, estado emisor, tipo de licencia
+- Otros países: extraé los campos equivalentes disponibles, usando null para los que no apliquen
+
 Devolvé ÚNICAMENTE JSON válido sin texto adicional ni bloques de código:
-{"holder":{"given_names":"","last_name_paternal":"","last_name_maternal":null,"curp":"","date_of_birth":"","sex":null,"blood_type":null,"nationality":null},"license":{"license_number":"","folio":null,"license_type":"","vehicles_authorized":null,"is_permanent":false,"issue_date":null,"expiry_date":null,"restrictions":null,"organ_donor":null},"issuer":{"state":"","authority":null,"module":null},"validation":{"status":"VALID","days_to_expiry":null,"overall_confidence":0.95,"field_confidence":{"license_number":0.95,"curp":0.99,"expiry_date":0.95,"given_names":0.99},"requires_manual_review":false,"alerts":[]}}
-status: "VALID", "EXPIRED" o "REQUIRES_REVIEW". Fechas en YYYY-MM-DD si es posible. null si campo no legible.`;
+{"holder":{"given_names":"","last_name_paternal":"","last_name_maternal":null,"id_number":null,"curp":null,"date_of_birth":"","sex":null,"blood_type":null,"nationality":null},"license":{"license_number":"","folio":null,"license_type":"","license_category":null,"vehicles_authorized":null,"is_permanent":false,"issue_date":null,"expiry_date":null,"restrictions":null,"organ_donor":null},"issuer":{"country":"","state":null,"authority":null,"module":null},"validation":{"status":"VALID","days_to_expiry":null,"overall_confidence":0.95,"field_confidence":{"license_number":0.95,"expiry_date":0.95,"given_names":0.99},"requires_manual_review":false,"alerts":[]}}
+status: "VALID", "EXPIRED" o "REQUIRES_REVIEW". Fechas en YYYY-MM-DD si es posible. null si campo no visible o no aplica al país.`;
 </script>
 </body>
 </html>
