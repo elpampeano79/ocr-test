@@ -283,6 +283,16 @@ function showResults(d){
   const sb=document.getElementById('sb');
   sb.className='sbanner';
   const se=document.getElementById('se'),st=document.getElementById('st'),sd=document.getElementById('sd');
+  if(status.includes('NOT_A_LICENSE')){
+    sb.classList.add('e');se.textContent='🪪';st.textContent='DOCUMENTO NO VÁLIDO';
+    const detected=d.validation?.document_detected||'documento desconocido';
+    sd.textContent='Se detectó: '+detected+'. Por favor subí el frente de la licencia de conducir.';
+    document.getElementById('fg').innerHTML='';
+    document.getElementById('cn').textContent='—';
+    document.querySelector('.arow').style.display='none';
+    return;
+  }
+  document.querySelector('.arow').style.display='';
   if(status.includes('EXPIRED')||status.includes('VENCID')){
     sb.classList.add('e');se.textContent='🚫';st.textContent='VENCIDA';
     sd.textContent='Licencia vencida — renovación requerida';
@@ -365,7 +375,10 @@ function showKeyModal(){
 window.addEventListener('load',()=>{if(!K)showKeyModal();});
 
 const PROMPT=`Sos un motor de OCR especializado en licencias de conducir mexicanas.
-Analizá la(s) imagen(s) adjuntas (frente y/o dorso) y extraé todos los campos visibles.
+PRIMERO: determiná si la imagen es una licencia de conducir mexicana. Si NO lo es (ej: DNI, pasaporte, credencial INE, tarjeta de crédito, factura, foto u otro documento), devolvé ÚNICAMENTE este JSON:
+{"validation":{"status":"NOT_A_LICENSE","document_detected":"[tipo de documento detectado]","alerts":["El documento enviado no es una licencia de conducir. Por favor subí el frente de la licencia de conducir."]}}
+
+Si SÍ es una licencia de conducir, analizá la(s) imagen(s) adjuntas (frente y/o dorso) y extraé todos los campos visibles.
 Devolvé ÚNICAMENTE JSON válido sin texto adicional ni bloques de código:
 {"holder":{"given_names":"","last_name_paternal":"","last_name_maternal":null,"curp":"","date_of_birth":"","sex":null,"blood_type":null,"nationality":null},"license":{"license_number":"","folio":null,"license_type":"","vehicles_authorized":null,"is_permanent":false,"issue_date":null,"expiry_date":null,"restrictions":null,"organ_donor":null},"issuer":{"state":"","authority":null,"module":null},"validation":{"status":"VALID","days_to_expiry":null,"overall_confidence":0.95,"field_confidence":{"license_number":0.95,"curp":0.99,"expiry_date":0.95,"given_names":0.99},"requires_manual_review":false,"alerts":[]}}
 status: "VALID", "EXPIRED" o "REQUIRES_REVIEW". Fechas en YYYY-MM-DD si es posible. null si campo no legible.`;
