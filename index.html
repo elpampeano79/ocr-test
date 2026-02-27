@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VecFleet — Validación OCR</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsTAAALEwEAmpwYAAABTElEQVQ4jcXTIWiXURQF8N8bY0FEwTJBTaK4sOJDLIJhoCJYB4JWxSa88BfDpt1ncHmgCNqF4ZLRoDzLkojJImhZsAjzLuz7YP9v/pmw4I2Xe84959z3UkQ4SE0dCA0R4V9V1BwLNcfj3b3pfQCH8BJnsIVT2MRyP5P67SmlIfgIGp6Vlla63mHM4hue49FfCWqOGWxghNO4g1/oh6ZxFK/2hFhzTOEjnnbbbmKutHQeV5FLS/O4UFp6MKag5ljAClZLS7Xm+I4vnX84iU+lpcU9IdYcIyziRmnpK5SWjg/UreLFmOT+jDXHxtDOpKo5TtQcl8YU2DlPP3Aft/ED10tLf7ps3uCYnWA3cXY3weeaYw3vcBfnsIS3Ncc6buF1aelJzXGxIzEM8RrmcK8jeIjLWMOH0tL7oZ1J72DUWfiJK6Wl35PySP/9N24Dil2CJMnmdD8AAAAASUVORK5CYII=">
 <style>
 :root{--p:#8D33FF;--c:#41EBD4;--bg:#070912;--s:#111827;--s2:#1C2535;--bd:rgba(141,51,255,.18);--t:#F1F5F9;--tm:#64748B;--g:#22C55E;--r:#EF4444;--y:#F59E0B;}
@@ -123,15 +124,15 @@ main{max-width:860px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
   <div class="ugrid">
     <div class="dz" id="zf" ondragover="drag(event,this)" ondragleave="undrag(this)" ondrop="drop(event,'f')">
       <span class="stag">Frente</span>
-      <input type="file" accept="image/*" id="if" onchange="pick(event,'f')">
-      <div class="dph"><div class="diw">📄</div><div class="dl">Frente de la licencia</div><div class="ds">Arrastrá o hacé click · JPG / PNG</div></div>
+      <input type="file" accept="image/*,application/pdf" id="if" onchange="pick(event,'f')">
+      <div class="dph"><div class="diw">📄</div><div class="dl">Frente de la licencia</div><div class="ds">Arrastrá o hacé click · JPG / PNG / PDF</div></div>
       <div class="sov"><div class="sring"></div><div class="slbl">Analizando frente…</div><div class="ssub">extrayendo campos OCR</div></div>
       <div class="pvw"><img class="pimg" id="pf"><div class="pfoot"><span class="pfname" id="nf"></span><span class="pchange" onclick="repl('f')">Cambiar</span></div></div>
     </div>
     <div class="dz" id="zb" ondragover="drag(event,this)" ondragleave="undrag(this)" ondrop="drop(event,'b')">
       <span class="stag">Dorso</span>
-      <input type="file" accept="image/*" id="ib" onchange="pick(event,'b')">
-      <div class="dph"><div class="diw">📋</div><div class="dl">Dorso de la licencia</div><div class="ds">Opcional · agrega más datos</div></div>
+      <input type="file" accept="image/*,application/pdf" id="ib" onchange="pick(event,'b')">
+      <div class="dph"><div class="diw">📋</div><div class="dl">Dorso de la licencia</div><div class="ds">Opcional · JPG / PNG / PDF</div></div>
       <div class="sov"><div class="sring"></div><div class="slbl">Actualizando con dorso…</div><div class="ssub">extrayendo campos adicionales</div></div>
       <div class="pvw"><img class="pimg" id="pb"><div class="pfoot"><span class="pfname" id="nb"></span><span class="pchange" onclick="repl('b')">Cambiar</span></div></div>
     </div>
@@ -165,15 +166,34 @@ function log(msg){const d=document.getElementById('dbg');d.style.display='block'
 // Drag/drop
 function drag(e,el){e.preventDefault();el.classList.add('drag-over');}
 function undrag(el){el.classList.remove('drag-over');}
-function drop(e,side){e.preventDefault();undrag(document.getElementById('z'+side));const f=e.dataTransfer.files[0];if(f&&f.type.startsWith('image/'))load(side,f);}
+function drop(e,side){e.preventDefault();undrag(document.getElementById('z'+side));const f=e.dataTransfer.files[0];if(f&&(f.type.startsWith('image/')||f.type==='application/pdf'))load(side,f);}
 function pick(e,side){const f=e.target.files[0];if(f)load(side,f);}
 function repl(side){document.getElementById('i'+side).click();}
 
-function load(side,file){
-  S[side]=file;
+async function pdfToImage(file){
+  const pdfjsLib=window['pdfjs-dist/build/pdf'];
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const page=await pdf.getPage(1);
+  const vp=page.getViewport({scale:2.5});
+  const canvas=document.createElement('canvas');
+  canvas.width=vp.width; canvas.height=vp.height;
+  await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+  return new Promise(res=>canvas.toBlob(b=>res(new File([b],file.name.replace(/\.pdf$/i,'.jpg'),{type:'image/jpeg'})),'image/jpeg',0.95));
+}
+
+async function load(side,file){
+  let imgFile=file;
+  if(file.type==='application/pdf'){
+    log('PDF detectado — convirtiendo página 1 a imagen…');
+    try{ imgFile=await pdfToImage(file); }
+    catch(err){ log('Error convirtiendo PDF: '+err.message); return; }
+  }
+  S[side]=imgFile;
   const z=document.getElementById('z'+side);
   z.classList.add('has-image');
-  document.getElementById('p'+side).src=URL.createObjectURL(file);
+  document.getElementById('p'+side).src=URL.createObjectURL(imgFile);
   document.getElementById('n'+side).textContent=file.name;
   if(S.busy){S.dirty=true;log('Queued: will re-run after current finishes');return;}
   run();
