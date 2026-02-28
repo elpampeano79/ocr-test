@@ -319,6 +319,7 @@ let CFG = {
 };
 const MDL = 'claude-haiku-4-5-20251001'; // Haiku: 5-10x higher rate limits vs Sonnet, great for OCR
 const MAX_CONCURRENT = 1; // Sequential: avoids Anthropic API rate limits (429)
+const API_THROTTLE_MS = 4500; // Min ms between API calls — keeps rate well below API limits
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 const DRIVERS = {};   // { cpf: { name, cpf, photo, docs:{cnh,tox,train}, el } }
@@ -407,7 +408,7 @@ async function processNext() {
   finally {
     ACTIVE--; DONE_FILES++;
     updateQueueBar();
-    processNext();
+    setTimeout(processNext, API_THROTTLE_MS); // throttle to prevent 429 rate limit errors
   }
 }
 
