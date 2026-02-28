@@ -662,13 +662,46 @@ async function pdfToImage(file) {
   lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const buf = await file.arrayBuffer();
   const pdf = await lib.getDocument({ data: buf }).promise;
-  const page = await pdf.getPage(1);
-  const vp = page.getViewport({ scale: 1.8 }); // 1.8x = good OCR quality, ~50% fewer image tokens vs 2.5x
+
+  // Page 1 canvas → used for OCR (send to Claude) + face detection
+  const page1 = await pdf.getPage(1);
+  const vp1 = page1.getViewport({ scale: 1.8 });
   const canvas = document.createElement('canvas');
-  canvas.width = vp.width; canvas.height = vp.height;
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  canvas.width = vp1.width; canvas.height = vp1.height;
+  await page1.render({ canvasContext: canvas.getContext('2d'), viewport: vp1 }).promise;
+
+  // All-pages preview → stacked vertically at 1.8x for the verification modal
+  const numPages = pdf.numPages;
+  let totalH = 0, pageCanvases = [];
+  for (let i = 1; i <= numPages; i++) {
+    const pg = await pdf.getPage(i);
+    const vp = pg.getViewport({ scale: 1.8 });
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    pageCanvases.push(c);
+    totalH += vp.height + (i < numPages ? 12 : 0); // 12px gap between pages
+  }
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = pageCanvases[0].width;
+  previewCanvas.height = totalH;
+  const ctx = previewCanvas.getContext('2d');
+  ctx.fillStyle = '#1a1f2e';
+  ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+  let y = 0;
+  for (const pc of pageCanvases) {
+    ctx.drawImage(pc, 0, y);
+    y += pc.height + 12;
+  }
+  const previewDataUrl = previewCanvas.toDataURL('image/jpeg', 0.92);
+
   const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  return { dataUrl, canvas, blob: await new Promise(r => canvas.toBlob(b => r(b), 'image/jpeg', 0.92)) };
+  return {
+    dataUrl,       // page 1 only — for OCR
+    previewDataUrl, // all pages stacked — for modal preview
+    canvas,
+    blob: await new Promise(r => canvas.toBlob(b => r(b), 'image/jpeg', 0.92))
+  };
 }
 
 async function imageToCanvas(file) {
@@ -787,10 +820,10 @@ async function processFile(file) {
   let imageB64, mimeType, previewUrl, pageCanvas = null, isPdf = false;
 
   if (file.type === 'application/pdf') {
-    const { dataUrl, blob, canvas } = await pdfToImage(file);
+    const { dataUrl, previewDataUrl, blob, canvas } = await pdfToImage(file);
     imageB64 = await b64(blob);
     mimeType = 'image/jpeg';
-    previewUrl = dataUrl;
+    previewUrl = previewDataUrl; // all pages stacked for modal; dataUrl (pg1) used for OCR
     pageCanvas = canvas;
     isPdf = true;
   } else {
@@ -1396,6 +1429,9 @@ function openDocModal(cpf, type) {
 
   document.getElementById('ocr-modal').classList.add('on');
   document.body.style.overflow = 'hidden';
+  // Re-apply transform AFTER modal layout is computed (fixes black image bug —
+  // the load event can fire before the modal is visible, giving wrap.clientWidth=0 → scale=0)
+  requestAnimationFrame(() => requestAnimationFrame(() => { _z=1;_tx=0;_ty=0; _applyTransform(); }));
 }
 
 function closeOcrModal(e) {
