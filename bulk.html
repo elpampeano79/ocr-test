@@ -317,7 +317,7 @@ let CFG = {
   months: parseInt(localStorage.getItem('vf_months') || '12'),
   endpoint: localStorage.getItem('vf_endpoint') || ''
 };
-const MDL = 'claude-sonnet-4-6';
+const MDL = 'claude-haiku-4-5-20251001'; // Haiku: 5-10x higher rate limits vs Sonnet, great for OCR
 const MAX_CONCURRENT = 1; // Sequential: avoids Anthropic API rate limits (429)
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -431,7 +431,7 @@ async function pdfToImage(file) {
   const buf = await file.arrayBuffer();
   const pdf = await lib.getDocument({ data: buf }).promise;
   const page = await pdf.getPage(1);
-  const vp = page.getViewport({ scale: 2.5 });
+  const vp = page.getViewport({ scale: 1.8 }); // 1.8x = good OCR quality, ~50% fewer image tokens vs 2.5x
   const canvas = document.createElement('canvas');
   canvas.width = vp.width; canvas.height = vp.height;
   await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
