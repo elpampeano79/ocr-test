@@ -160,13 +160,15 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 #driver-grid.list-view .ddoc-status{font-size:.64rem}
 #driver-grid.list-view .dcard-footer{flex:0 0 148px;border-top:none;border-left:1px solid var(--bd);background:transparent;padding:.5rem .85rem;justify-content:center;flex-direction:column;align-items:flex-start;gap:.18rem}
 #driver-grid.list-view .dexp{font-size:.62rem}
-/* list header (column labels) */
-#list-header{display:none;margin-bottom:.2rem}
-.list-hdr-row{display:flex;font-size:.62rem;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.06em;padding:0 0 .25rem}
-.list-hdr-name{flex:0 0 215px;padding:.1rem .85rem;border-right:1px solid transparent}
-.list-hdr-docs{flex:1;display:grid;grid-template-columns:repeat(3,1fr)}
-.list-hdr-doc{text-align:center;padding:.1rem .6rem}
-.list-hdr-state{flex:0 0 148px;padding:.1rem .85rem;border-left:1px solid transparent}
+/* list header card — lives inside #driver-grid, hidden in card mode */
+#list-hdr-card{display:none}
+#driver-grid.list-view #list-hdr-card{display:flex;align-items:stretch;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}
+#list-hdr-card .dcard-top{background:transparent;border-bottom:none;border-right:1px solid rgba(255,255,255,.08)}
+#list-hdr-card .dcard-docs{display:grid;grid-template-columns:repeat(3,1fr)}
+#list-hdr-card .ddoc{border-bottom:none;border-right:1px solid rgba(255,255,255,.08);flex-direction:column;align-items:center;justify-content:center;padding:.45rem .6rem}
+#list-hdr-card .ddoc:last-child{border-right:none}
+#list-hdr-card .dcard-footer{background:transparent;border-top:none;border-left:1px solid rgba(255,255,255,.08);justify-content:center}
+.lhdr{font-size:.6rem;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;text-align:center}
 </style>
 </head>
 <body>
@@ -273,21 +275,18 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
     </div>
   </div>
 
-  <!-- LIST VIEW COLUMN HEADER -->
-  <div id="list-header">
-    <div class="list-hdr-row">
-      <div class="list-hdr-name">Chofer</div>
-      <div class="list-hdr-docs">
-        <div class="list-hdr-doc">CNH</div>
-        <div class="list-hdr-doc">Toxicológico</div>
-        <div class="list-hdr-doc">Entrenamiento</div>
+  <!-- DRIVER GRID (first child = header row, always inside grid for perfect column alignment) -->
+  <div id="driver-grid">
+    <div id="list-hdr-card">
+      <div class="dcard-top"><span class="lhdr">Chofer</span></div>
+      <div class="dcard-docs">
+        <div class="ddoc"><span class="lhdr">CNH / Licencia</span></div>
+        <div class="ddoc"><span class="lhdr">Toxicológico</span></div>
+        <div class="ddoc"><span class="lhdr">Entrenamiento</span></div>
       </div>
-      <div class="list-hdr-state">Estado</div>
+      <div class="dcard-footer"><span class="lhdr">Estado</span></div>
     </div>
   </div>
-
-  <!-- DRIVER GRID -->
-  <div id="driver-grid"></div>
 
   <!-- EMPTY STATE -->
   <div id="empty">
@@ -388,7 +387,6 @@ function handleFiles(files) {
   // Apply default list view on first load
   if (!document.getElementById('driver-grid').classList.contains('list-view')) {
     document.getElementById('driver-grid').classList.add('list-view');
-    document.getElementById('list-header').style.display = '';
   }
   TOTAL_FILES += files.length;
   files.forEach(f => QUEUE.push(f));
@@ -954,7 +952,6 @@ function toggleView(mode) {
   VIEW_MODE = mode;
   const grid = document.getElementById('driver-grid');
   grid.classList.toggle('list-view', mode === 'list');
-  document.getElementById('list-header').style.display = mode === 'list' ? '' : 'none';
   document.getElementById('v-card').classList.toggle('active', mode === 'card');
   document.getElementById('v-list').classList.toggle('active', mode === 'list');
 }
