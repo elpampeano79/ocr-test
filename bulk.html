@@ -863,7 +863,8 @@ function driverStatus(cpf) {
   const cnhOk = isDocValid(d, 'cnh');
   const toxOk = isDocValid(d, 'tox');
   const trainOk = isDocValid(d, 'train');
-  if (cnhOk === null && toxOk === null && trainOk === null) return 'procesando';
+  // Excel-only entries have no docs yet — show as incomplete, not "processing"
+  if (cnhOk === null && toxOk === null && trainOk === null) return d.fromExcel ? 'incompleto' : 'procesando';
   if (cnhOk === false || toxOk === false || trainOk === false) return 'inapto';
   if (cnhOk && toxOk && trainOk) return 'apto';
   return 'incompleto';
@@ -903,7 +904,7 @@ function cardHTML(cpf) {
       ${docRow('train','🎓','Entrenamiento',cpf)}
     </div>
     <div class="dcard-footer">
-      <div class="dstatus procesando" id="ds-${safeId}">${statusLabel('procesando')}</div>
+      <div class="dstatus ${d.fromExcel ? 'incompleto' : 'procesando'}" id="ds-${safeId}">${statusLabel(d.fromExcel ? 'incompleto' : 'procesando')}</div>
       <div class="dexp" id="de-${safeId}"></div>
     </div>
     <div class="dcard-usuario">
