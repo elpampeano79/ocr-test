@@ -476,26 +476,67 @@ async function initFaceApi() {
   return _faceApiLoading;
 }
 
-async function detectAndCropFace(canvas) {
+async function detectAndCropFace(canvas, isPdf = false) {
   if (!canvas) return null;
   if (!await initFaceApi()) return null;
-  try {
-    const det = await faceapi.detectSingleFace(
-      canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 })
-    );
-    if (!det) return null;
-    const { x, y, width: w, height: h } = det.box;
+
+  // Extract a sub-region from a canvas (normalized coords)
+  function subCrop(src, nx, ny, nw, nh) {
+    const px = Math.round(nx * src.width), py = Math.round(ny * src.height);
+    const pw = Math.round(nw * src.width), ph = Math.round(nh * src.height);
+    if (pw < 30 || ph < 30) return null;
+    const c = document.createElement('canvas');
+    c.width = pw; c.height = ph;
+    c.getContext('2d').drawImage(src, px, py, pw, ph, 0, 0, pw, ph);
+    return c;
+  }
+
+  // Extract padded face from original canvas using detected box + optional offset
+  function extractFace(src, box, offX = 0, offY = 0) {
     const pad = 0.35;
+    const x = box.x + offX, y = box.y + offY, w = box.width, h = box.height;
     const rx = Math.max(0, x - w * pad);
     const ry = Math.max(0, y - h * pad);
-    const rw = Math.min(canvas.width - rx, w * (1 + pad * 2));
-    const rh = Math.min(canvas.height - ry, h * (1 + pad * 2));
+    const rw = Math.min(src.width - rx, w * (1 + pad * 2));
+    const rh = Math.min(src.height - ry, h * (1 + pad * 2));
     if (rw < 20 || rh < 20) return null;
     const dst = document.createElement('canvas');
     dst.width = rw; dst.height = rh;
-    dst.getContext('2d').drawImage(canvas, rx, ry, rw, rh, 0, 0, rw, rh);
+    dst.getContext('2d').drawImage(src, rx, ry, rw, rh, 0, 0, rw, rh);
     return dst.toDataURL('image/jpeg', 0.92);
-  } catch(e) { console.warn('face detect error:', e); return null; }
+  }
+
+  async function detect(c, inputSize, score) {
+    try { return await faceapi.detectSingleFace(c, new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: score })); }
+    catch(e) { return null; }
+  }
+
+  // Attempt 1: full image — works for real CNH card photos
+  let det = await detect(canvas, 416, 0.22);
+  if (det) return extractFace(canvas, det.box);
+
+  // Attempt 2: crop to left 47% × top 50% of page — PDF format has CNH card thumbnail there
+  // Face in card becomes ~22% of crop width → detectable at inputSize=416
+  const cardOffY = Math.round(0.03 * canvas.height);
+  const cardCrop = subCrop(canvas, 0, 0.03, 0.47, 0.50);
+  if (cardCrop) {
+    det = await detect(cardCrop, 416, 0.18);
+    if (det) return extractFace(canvas, det.box, 0, cardOffY);
+  }
+
+  // Attempt 3 (PDF only): tight crop on known face region in SENATRAN/DENATRAN digital format
+  // Face photo is always in upper-left of the card thumbnail: ~x=3-22%, y=8-28% of page
+  if (isPdf) {
+    const faceCrop = subCrop(canvas, 0.03, 0.08, 0.20, 0.21);
+    if (faceCrop) {
+      det = await detect(faceCrop, 224, 0.12);
+      if (det) return extractFace(faceCrop, det.box);
+      // Last resort: use the known face region directly — better than initials for PDF CNH
+      return faceCrop.toDataURL('image/jpeg', 0.92);
+    }
+  }
+
+  return null; // → show initials
 }
 
 function b64(blob) {
@@ -510,7 +551,7 @@ function b64(blob) {
 // ─── PROCESS FILE ─────────────────────────────────────────────────────────────
 async function processFile(file) {
   log('Procesando: ' + file.name);
-  let imageB64, mimeType, previewUrl, pageCanvas = null;
+  let imageB64, mimeType, previewUrl, pageCanvas = null, isPdf = false;
 
   if (file.type === 'application/pdf') {
     const { dataUrl, blob, canvas } = await pdfToImage(file);
@@ -518,6 +559,7 @@ async function processFile(file) {
     mimeType = 'image/jpeg';
     previewUrl = dataUrl;
     pageCanvas = canvas;
+    isPdf = true;
   } else {
     imageB64 = await b64(file);
     mimeType = file.type || 'image/jpeg';
@@ -534,7 +576,7 @@ async function processFile(file) {
   let facePhoto = null;
   if (result.type === 'CNH' && pageCanvas) {
     log('Detectando cara...');
-    facePhoto = await detectAndCropFace(pageCanvas);
+    facePhoto = await detectAndCropFace(pageCanvas, isPdf);
     log(facePhoto ? 'Cara detectada ✓' : 'Sin cara detectada');
   }
   applyResult(result, previewUrl, facePhoto);
