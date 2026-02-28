@@ -187,6 +187,35 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .stats{grid-template-columns:repeat(6,1fr) !important}
 /* Excel tag */
 .uz-tag.xls{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25);color:var(--g)}
+/* Clickable doc cells */
+.doc-clickable{cursor:pointer;transition:background .15s}
+.doc-clickable:hover{background:rgba(141,51,255,.08) !important}
+.doc-clickable:hover .ddoc-name{color:var(--p)}
+
+/* OCR Verification Modal */
+#ocr-modal{display:none;align-items:center;justify-content:center;padding:1.5rem}
+#ocr-modal.on{display:flex}
+.ocr-modal-inner{background:#111827;border:1px solid rgba(141,51,255,.25);border-radius:18px;width:100%;max-width:920px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.7)}
+.ocr-modal-hdr{display:flex;align-items:flex-start;justify-content:space-between;padding:1.1rem 1.4rem;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0}
+.ocr-modal-title{font-size:1rem;font-weight:700}
+.ocr-modal-sub{font-size:.75rem;color:var(--tm);margin-top:.2rem}
+.ocr-close{background:none;border:none;color:var(--tm);font-size:1.1rem;cursor:pointer;padding:.2rem .5rem;border-radius:6px;transition:color .15s}
+.ocr-close:hover{color:var(--t)}
+.ocr-modal-body{display:grid;grid-template-columns:1fr 1fr;flex:1;overflow:hidden;min-height:0}
+.ocr-img-side{background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:1.2rem;overflow:auto;border-right:1px solid rgba(255,255,255,.07)}
+.ocr-img-side img{max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain}
+.ocr-fields-side{padding:1.2rem 1.4rem;overflow-y:auto}
+.ocr-fields-title{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--tm);margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid rgba(255,255,255,.06)}
+.ocr-field{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.ocr-field:last-child{border-bottom:none}
+.ocr-field-lbl{font-size:.72rem;color:var(--tm);flex-shrink:0}
+.ocr-field-val{font-size:.8rem;font-weight:600;text-align:right;word-break:break-all}
+.ocr-field-val.ok{color:var(--g)}
+.ocr-field-val.err{color:var(--r)}
+.ocr-field-val.warn{color:var(--y)}
+.ocr-field-val.dim{color:var(--tm);font-weight:400}
+.ocr-no-doc{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:.75rem;color:var(--tm);font-size:.85rem}
+
 /* Column header tooltips */
 .has-tip{position:relative;cursor:default}
 .has-tip .tip{display:none;position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e2a3a;border:1px solid rgba(141,51,255,.3);border-radius:10px;padding:.65rem .85rem;font-size:.68rem;font-weight:400;color:var(--t);white-space:nowrap;line-height:1.7;z-index:200;box-shadow:0 8px 32px rgba(0,0,0,.5);pointer-events:none}
@@ -329,6 +358,28 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
             <b>✓ LISTO</b> — apto + email + transportadora ✓
           </span>
         </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- OCR VERIFICATION MODAL -->
+  <div class="modal-bg" id="ocr-modal" onclick="closeOcrModal(event)">
+    <div class="ocr-modal-inner">
+      <div class="ocr-modal-hdr">
+        <div>
+          <div class="ocr-modal-title" id="ocr-title">Verificación de documento</div>
+          <div class="ocr-modal-sub" id="ocr-sub"></div>
+        </div>
+        <button class="ocr-close" onclick="closeOcrModal(null)">✕</button>
+      </div>
+      <div class="ocr-modal-body">
+        <div class="ocr-img-side">
+          <img id="ocr-img" src="" alt="Documento original">
+        </div>
+        <div class="ocr-fields-side">
+          <div class="ocr-fields-title">Campos extraídos por OCR</div>
+          <div id="ocr-fields"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -817,6 +868,9 @@ function applyResult(result, previewUrl, facePhoto) {
   const driver = DRIVERS[cpf];
   if (result.name && result.name.length > 2) driver.name = result.name;
 
+  // Attach preview URL to result for OCR verification modal
+  result._preview = previewUrl;
+
   if (result.type === 'CNH') {
     driver.docs.cnh = result;
     if (result.registro) driver.cnh_num = result.registro;
@@ -939,7 +993,7 @@ function cardHTML(cpf) {
 
 function docRow(type, icon, label, cpf) {
   const id = cpf.replace(/\W/g,'_');
-  return `<div class="ddoc">
+  return `<div class="ddoc doc-clickable" id="ddoc-${type}-${id}" onclick="openDocModal('${cpf}','${type}')">
     <div class="ddoc-icon">${icon}</div>
     <div class="ddoc-name">${label}</div>
     <div class="ddoc-status pending" id="dr-${type}-${id}">— Pendiente</div>
@@ -1183,6 +1237,91 @@ async function uploadSelected() {
   btn.disabled = false;
   btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;margin-right:6px"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2v1.5c1.2.7 2 2 2 3.5a4 4 0 0 1-8 0c0-1.5.8-2.8 2-3.5V16H8a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2h2V9.5C8.8 8.8 8 7.5 8 6a4 4 0 0 1 4-4z"/></svg>Cargar con Eric`;
 }
+
+// ─── OCR VERIFICATION MODAL ───────────────────────────────────────────────────
+const DOC_META = {
+  cnh:   { label: '🪪 CNH / Licencia de Conducir', fields: [
+    { key: 'name',         lbl: 'Nombre' },
+    { key: 'cpf',          lbl: 'CPF' },
+    { key: 'registro',     lbl: 'Nº Registro' },
+    { key: 'dob',          lbl: 'Fecha nacimiento' },
+    { key: 'validity',     lbl: 'Vencimiento',  style: d => d.status === 'VALID' ? 'ok' : 'err' },
+    { key: 'category',     lbl: 'Categoría' },
+    { key: 'issuer_state', lbl: 'Estado emisor' },
+    { key: 'status',       lbl: 'Estado doc',   style: d => d.status === 'VALID' ? 'ok' : 'err',
+      fmt: v => v === 'VALID' ? '✓ VIGENTE' : '✗ VENCIDA' },
+  ]},
+  tox:   { label: '🔬 Laudo Toxicológico', fields: [
+    { key: 'name',            lbl: 'Nombre' },
+    { key: 'cpf',             lbl: 'CPF' },
+    { key: 'lab',             lbl: 'Laboratorio' },
+    { key: 'collection_date', lbl: 'Fecha colección' },
+    { key: 'validity_date',   lbl: 'Vencimiento', style: d => d.is_valid ? 'ok' : 'warn' },
+    { key: 'result',          lbl: 'Resultado',   style: d => d.result === 'NEGATIVE' ? 'ok' : 'err',
+      fmt: v => v === 'NEGATIVE' ? '✓ NEGATIVO' : '✗ POSITIVO' },
+    { key: 'is_valid',        lbl: 'Válido',       style: d => d.is_valid ? 'ok' : 'err',
+      fmt: v => v ? '✓ Sí' : '✗ No' },
+  ]},
+  train: { label: '🎓 Certificado de Entrenamiento', fields: [
+    { key: 'name',            lbl: 'Nombre' },
+    { key: 'cpf',             lbl: 'CPF' },
+    { key: 'institution',     lbl: 'Institución' },
+    { key: 'course',          lbl: 'Curso' },
+    { key: 'completion_date', lbl: 'Fecha realización' },
+  ]},
+};
+
+function openDocModal(cpf, type) {
+  const d = DRIVERS[cpf];
+  if (!d) return;
+  const doc = d.docs[type];
+  const meta = DOC_META[type];
+  if (!meta) return;
+
+  document.getElementById('ocr-title').textContent = meta.label;
+  document.getElementById('ocr-sub').textContent = d.name + (d.cpf ? '  ·  CPF ' + d.cpf : '');
+
+  // Image
+  const img = document.getElementById('ocr-img');
+  const imgSide = img.parentElement;
+  if (doc && doc._preview) {
+    img.src = doc._preview;
+    img.style.display = '';
+    imgSide.querySelector('.ocr-no-doc')?.remove();
+  } else {
+    img.style.display = 'none';
+    if (!imgSide.querySelector('.ocr-no-doc')) {
+      const nd = document.createElement('div');
+      nd.className = 'ocr-no-doc';
+      nd.innerHTML = '<span style="font-size:2rem">📄</span><span>Documento no procesado aún</span>';
+      imgSide.appendChild(nd);
+    }
+  }
+
+  // Fields
+  const fieldsEl = document.getElementById('ocr-fields');
+  if (!doc) {
+    fieldsEl.innerHTML = '<div class="ocr-no-doc" style="height:auto;padding:2rem 0">Sin datos extraídos — subí el documento PDF/imagen</div>';
+  } else {
+    fieldsEl.innerHTML = meta.fields.map(f => {
+      let val = doc[f.key];
+      const display = val === null || val === undefined || val === '' ? '<span class="ocr-field-val dim">—</span>'
+        : `<span class="ocr-field-val ${f.style ? f.style(doc) : ''}">${f.fmt ? f.fmt(val) : val}</span>`;
+      return `<div class="ocr-field"><span class="ocr-field-lbl">${f.lbl}</span>${display}</div>`;
+    }).join('');
+  }
+
+  document.getElementById('ocr-modal').classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOcrModal(e) {
+  if (e && e.target !== document.getElementById('ocr-modal')) return;
+  document.getElementById('ocr-modal').classList.remove('on');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeOcrModal(null); });
 
 // ─── VIEW TOGGLE ──────────────────────────────────────────────────────────────
 function toggleView(mode) {
