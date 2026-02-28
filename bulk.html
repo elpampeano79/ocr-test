@@ -185,6 +185,9 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .badge.err{background:rgba(239,68,68,.1);color:var(--r);border:1px solid rgba(239,68,68,.2)}
 /* Excel entry tag */
 .dcard.from-excel .dcard-top{border-left:3px solid var(--c)}
+/* CPF collision warning */
+.dcard.cpf-collision{outline:2px solid var(--y) !important;outline-offset:-2px}
+.dcard.cpf-collision .dcard-top::after{content:'⚠ CPF duplicado — revisá el OCR';font-size:.58rem;color:var(--y);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:5px;padding:.15rem .45rem;margin-left:auto;white-space:nowrap}
 .excel-src{font-size:.58rem;color:var(--c);opacity:.7}
 /* Stats grid 6 cols */
 .stats{grid-template-columns:repeat(6,1fr) !important}
@@ -897,6 +900,20 @@ function applyResult(result, previewUrl, facePhoto) {
   }
 
   const driver = DRIVERS[cpf];
+
+  // Detect CPF collision: same CPF but different name on a CNH → likely OCR error
+  if (result.type === 'CNH' && driver.docs.cnh && result.name && driver.name) {
+    const existingNorm = normalizeName(driver.name);
+    const newNorm = normalizeName(result.name);
+    if (existingNorm !== newNorm) {
+      const msg = `⚠ CPF duplicado: ${cpf}\n"${driver.name}" → "${result.name}"\nVerificá el OCR en ambos documentos.`;
+      log('⚠ CPF DUPLICADO: ' + driver.name + ' / ' + result.name + ' → ' + cpf);
+      toast(`⚠ CPF duplicado para "${result.name}" — revisá el OCR`, 'warn');
+      // Mark the card so it's visually flagged
+      if (driver.el) driver.el.classList.add('cpf-collision');
+    }
+  }
+
   if (result.name && result.name.length > 2) driver.name = result.name;
 
   // Attach preview URL to result for OCR verification modal
