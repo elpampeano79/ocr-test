@@ -454,17 +454,48 @@ async function imageToCanvas(file) {
   });
 }
 
-function cropCanvas(srcCanvas, crop) {
-  if (!srcCanvas || !crop) return null;
-  const x = Math.round(crop.x * srcCanvas.width);
-  const y = Math.round(crop.y * srcCanvas.height);
-  const w = Math.round(crop.w * srcCanvas.width);
-  const h = Math.round(crop.h * srcCanvas.height);
-  if (w < 10 || h < 10) return null;
-  const dst = document.createElement('canvas');
-  dst.width = w; dst.height = h;
-  dst.getContext('2d').drawImage(srcCanvas, x, y, w, h, 0, 0, w, h);
-  return dst.toDataURL('image/jpeg', 0.9);
+// ─── FACE DETECTION (face-api.js lazy load) ───────────────────────────────────
+let _faceApiReady = false, _faceApiLoading = null;
+async function initFaceApi() {
+  if (_faceApiReady) return true;
+  if (_faceApiLoading) return _faceApiLoading;
+  _faceApiLoading = (async () => {
+    if (!window.faceapi) {
+      await new Promise((ok, fail) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+        s.onload = ok; s.onerror = fail;
+        document.head.appendChild(s);
+      });
+    }
+    await faceapi.nets.tinyFaceDetector.loadFromUri(
+      'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'
+    );
+    _faceApiReady = true; return true;
+  })().catch(e => { console.warn('face-api init failed:', e); return false; });
+  return _faceApiLoading;
+}
+
+async function detectAndCropFace(canvas) {
+  if (!canvas) return null;
+  if (!await initFaceApi()) return null;
+  try {
+    const det = await faceapi.detectSingleFace(
+      canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 })
+    );
+    if (!det) return null;
+    const { x, y, width: w, height: h } = det.box;
+    const pad = 0.35;
+    const rx = Math.max(0, x - w * pad);
+    const ry = Math.max(0, y - h * pad);
+    const rw = Math.min(canvas.width - rx, w * (1 + pad * 2));
+    const rh = Math.min(canvas.height - ry, h * (1 + pad * 2));
+    if (rw < 20 || rh < 20) return null;
+    const dst = document.createElement('canvas');
+    dst.width = rw; dst.height = rh;
+    dst.getContext('2d').drawImage(canvas, rx, ry, rw, rh, 0, 0, rw, rh);
+    return dst.toDataURL('image/jpeg', 0.92);
+  } catch(e) { console.warn('face detect error:', e); return null; }
 }
 
 function b64(blob) {
@@ -498,7 +529,15 @@ async function processFile(file) {
   if (!result) return;
 
   log('Resultado: ' + result.type + ' — ' + (result.name || '?') + ' CPF:' + (result.cpf || '?'));
-  applyResult(result, previewUrl, pageCanvas);
+
+  // For CNH, detect and crop the face photo using ML (face-api.js)
+  let facePhoto = null;
+  if (result.type === 'CNH' && pageCanvas) {
+    log('Detectando cara...');
+    facePhoto = await detectAndCropFace(pageCanvas);
+    log(facePhoto ? 'Cara detectada ✓' : 'Sin cara detectada');
+  }
+  applyResult(result, previewUrl, facePhoto);
 }
 
 // ─── CLAUDE API ───────────────────────────────────────────────────────────────
@@ -515,8 +554,7 @@ TIPOS POSIBLES:
 
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
-Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","status":"VALID_OR_EXPIRED","face_crop":{"x":0.0,"y":0.0,"w":0.0,"h":0.0}}
-IMPORTANTE face_crop: mirá la imagen con atención. En las CNH brasileñas la foto del conductor está casi siempre en el cuadrante INFERIOR IZQUIERDO del documento (abajo a la izquierda). Estimá el rectángulo de la cara incluyendo un poco de hombros. Ejemplo real: {"x":0.03,"y":0.53,"w":0.22,"h":0.38}. Si definitivamente no hay foto visible, usá {"x":0,"y":0,"w":0,"h":0}.
+Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","status":"VALID_OR_EXPIRED"}
 Para TOXICOLOGY: {"type":"TOXICOLOGY","name":"","cpf":"","result":"NEGATIVE_OR_POSITIVE","validity_date":"","collection_date":"","lab":"","is_valid":true}
 Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"","completion_date":""}
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
@@ -526,8 +564,7 @@ Reglas:
 - Fechas en formato YYYY-MM-DD
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
-- null para campos no visibles
-- face_crop: coordenadas normalizadas (0-1) del rectángulo de la foto del conductor en la CNH. x/y = esquina superior-izquierda, w/h = ancho y alto. La foto en CNH brasileña suele estar abajo a la izquierda. Si no hay foto visible devolvé {"x":0,"y":0,"w":0,"h":0}. NO copies los ceros del template si ves una foto — estimá sus coordenadas reales.`;
+- null para campos no visibles`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -561,7 +598,7 @@ Reglas:
 }
 
 // ─── APPLY RESULT TO DRIVER ───────────────────────────────────────────────────
-function applyResult(result, previewUrl, pageCanvas) {
+function applyResult(result, previewUrl, facePhoto) {
   if (result.type === 'UNKNOWN') {
     log('Documento no reconocido: ' + result.detected);
     toast('Documento no reconocido: ' + result.detected, 'err');
@@ -583,9 +620,7 @@ function applyResult(result, previewUrl, pageCanvas) {
   if (result.type === 'CNH') {
     driver.docs.cnh = result;
     if (!driver.photo) {
-      // Crop face photo from CNH. Fallback to null = show initials (never show full doc thumbnail)
-      const cropped = result.face_crop ? cropCanvas(pageCanvas, result.face_crop) : null;
-      driver.photo = cropped || null;
+      driver.photo = facePhoto || null; // null = show initials
     }
   } else if (result.type === 'TOXICOLOGY') {
     driver.docs.tox = result;
