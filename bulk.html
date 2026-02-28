@@ -670,17 +670,17 @@ async function pdfToImage(file) {
   canvas.width = vp1.width; canvas.height = vp1.height;
   await page1.render({ canvasContext: canvas.getContext('2d'), viewport: vp1 }).promise;
 
-  // All-pages preview → stacked vertically at 1.8x for the verification modal
+  // All-pages preview → stacked vertically at 3x (higher res than OCR) for the verification modal
   const numPages = pdf.numPages;
   let totalH = 0, pageCanvases = [];
   for (let i = 1; i <= numPages; i++) {
     const pg = await pdf.getPage(i);
-    const vp = pg.getViewport({ scale: 1.8 });
+    const vp = pg.getViewport({ scale: 3.0 }); // 3x for sharp zoom in modal
     const c = document.createElement('canvas');
     c.width = vp.width; c.height = vp.height;
     await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
     pageCanvases.push(c);
-    totalH += vp.height + (i < numPages ? 12 : 0); // 12px gap between pages
+    totalH += vp.height + (i < numPages ? 16 : 0); // 16px gap between pages
   }
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = pageCanvases[0].width;
@@ -691,7 +691,7 @@ async function pdfToImage(file) {
   let y = 0;
   for (const pc of pageCanvases) {
     ctx.drawImage(pc, 0, y);
-    y += pc.height + 12;
+    y += pc.height + 16;
   }
   const previewDataUrl = previewCanvas.toDataURL('image/jpeg', 0.92);
 
