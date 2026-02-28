@@ -516,6 +516,7 @@ TIPOS POSIBLES:
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
 Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","status":"VALID_OR_EXPIRED","face_crop":{"x":0.0,"y":0.0,"w":0.0,"h":0.0}}
+IMPORTANTE face_crop: mirá la imagen con atención. En las CNH brasileñas la foto del conductor está casi siempre en el cuadrante INFERIOR IZQUIERDO del documento (abajo a la izquierda). Estimá el rectángulo de la cara incluyendo un poco de hombros. Ejemplo real: {"x":0.03,"y":0.53,"w":0.22,"h":0.38}. Si definitivamente no hay foto visible, usá {"x":0,"y":0,"w":0,"h":0}.
 Para TOXICOLOGY: {"type":"TOXICOLOGY","name":"","cpf":"","result":"NEGATIVE_OR_POSITIVE","validity_date":"","collection_date":"","lab":"","is_valid":true}
 Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"","completion_date":""}
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
@@ -526,7 +527,7 @@ Reglas:
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
 - null para campos no visibles
-- face_crop: coordenadas normalizadas (0 a 1) de la foto del conductor dentro del documento CNH. Ejemplo: {"x":0.05,"y":0.08,"w":0.22,"h":0.35} significa que la foto empieza al 5% del ancho y 8% del alto, y mide 22% x 35% del total`;
+- face_crop: coordenadas normalizadas (0-1) del rectángulo de la foto del conductor en la CNH. x/y = esquina superior-izquierda, w/h = ancho y alto. La foto en CNH brasileña suele estar abajo a la izquierda. Si no hay foto visible devolvé {"x":0,"y":0,"w":0,"h":0}. NO copies los ceros del template si ves una foto — estimá sus coordenadas reales.`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -582,9 +583,9 @@ function applyResult(result, previewUrl, pageCanvas) {
   if (result.type === 'CNH') {
     driver.docs.cnh = result;
     if (!driver.photo) {
-      // Try to crop just the face photo from the CNH using face_crop coordinates
+      // Crop face photo from CNH. Fallback to null = show initials (never show full doc thumbnail)
       const cropped = result.face_crop ? cropCanvas(pageCanvas, result.face_crop) : null;
-      driver.photo = cropped || previewUrl;
+      driver.photo = cropped || null;
     }
   } else if (result.type === 'TOXICOLOGY') {
     driver.docs.tox = result;
