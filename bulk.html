@@ -187,6 +187,11 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .stats{grid-template-columns:repeat(6,1fr) !important}
 /* Excel tag */
 .uz-tag.xls{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25);color:var(--g)}
+/* Column header tooltips */
+.has-tip{position:relative;cursor:default}
+.has-tip .tip{display:none;position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e2a3a;border:1px solid rgba(141,51,255,.3);border-radius:10px;padding:.65rem .85rem;font-size:.68rem;font-weight:400;color:var(--t);white-space:nowrap;line-height:1.7;z-index:200;box-shadow:0 8px 32px rgba(0,0,0,.5);pointer-events:none}
+.has-tip .tip::before{content:'';position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:8px;height:8px;background:#1e2a3a;border-left:1px solid rgba(141,51,255,.3);border-top:1px solid rgba(141,51,255,.3);rotate:45deg}
+.has-tip:hover .tip{display:block}
 </style>
 </head>
 <body>
@@ -304,8 +309,27 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
         <div class="ddoc"><span class="lhdr">Toxicológico</span></div>
         <div class="ddoc"><span class="lhdr">Entrenamiento</span></div>
       </div>
-      <div class="dcard-footer"><span class="lhdr">Persona</span></div>
-      <div class="dcard-usuario"><span class="lhdr">Usuario</span></div>
+      <div class="dcard-footer">
+        <span class="lhdr has-tip">Persona
+          <span class="tip">
+            <b>● INCOMPLETO</b> — esperando PDFs<br>
+            <b>● PROCESANDO…</b> — analizando docs<br>
+            <b>● NO APTO</b> — doc vencido o positivo<br>
+            <b>● APTO</b> — CNH + Tox + Entrena. OK ✓
+          </span>
+        </span>
+      </div>
+      <div class="dcard-usuario">
+        <span class="lhdr has-tip">Usuario
+          <span class="tip">
+            <b>⏳ Docs pendientes</b> — persona no apta aún<br>
+            <b>✗ No apto</b> — docs vencidos<br>
+            <b>⚠ Sin email</b> — falta email en Excel<br>
+            <b>⚠ Falta datos</b> — falta transportadora<br>
+            <b>✓ LISTO</b> — apto + email + transportadora ✓
+          </span>
+        </span>
+      </div>
     </div>
   </div>
 
