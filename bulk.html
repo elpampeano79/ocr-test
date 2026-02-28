@@ -145,29 +145,32 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .btn-view:hover{border-color:var(--p);color:var(--t)}
 .btn-view.active{background:rgba(141,51,255,.15);border-color:var(--p);color:var(--p)}
 
-/* LIST VIEW */
-#driver-grid.list-view{grid-template-columns:1fr !important;gap:.3rem}
-#driver-grid.list-view .dcard{display:flex;align-items:stretch;border-radius:10px}
-#driver-grid.list-view .dcard-top{flex:0 0 215px;border-bottom:none;border-right:1px solid var(--bd);padding:.55rem .85rem;background:transparent;display:flex;align-items:center;gap:.65rem}
+/* LIST VIEW — CSS Subgrid: each card spans all 5 tracks, inheriting exact column widths */
+#driver-grid.list-view{grid-template-columns:215px 1fr 1fr 1fr 148px !important;gap:4px 0 !important}
+/* Each card spans full width and uses subgrid to inherit parent column tracks */
+#driver-grid.list-view>.dcard,#driver-grid.list-view>#list-hdr-card{grid-column:1/-1;display:grid;grid-template-columns:subgrid;border-radius:10px}
+/* dcard-docs spans middle 3 columns (2-4) with its own subgrid */
+#driver-grid.list-view .dcard-docs{grid-column:2/5;display:grid;grid-template-columns:subgrid;padding:0;border-bottom:none}
+/* COL 1 — Chofer */
+#driver-grid.list-view .dcard-top{display:flex;align-items:center;gap:.65rem;padding:.55rem .85rem;background:var(--s2);border-bottom:none;border-right:1px solid var(--bd)}
 #driver-grid.list-view .davatar{width:38px;height:38px;border-radius:9px;font-size:.82rem;flex-shrink:0}
 #driver-grid.list-view .dname{font-size:.8rem}
 #driver-grid.list-view .dcpf{font-size:.68rem}
-#driver-grid.list-view .dcard-docs{flex:1;display:grid;grid-template-columns:repeat(3,1fr);border-bottom:none;padding:0}
-#driver-grid.list-view .ddoc{border-bottom:none;border-right:1px solid rgba(255,255,255,.05);padding:.5rem .6rem;flex-direction:column;align-items:center;justify-content:center;gap:.14rem;text-align:center}
+/* COL 2,3,4 — Doc cells */
+#driver-grid.list-view .ddoc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.14rem;text-align:center;padding:.5rem .6rem;border-bottom:none;border-right:1px solid rgba(255,255,255,.08)}
 #driver-grid.list-view .ddoc:last-child{border-right:none}
 #driver-grid.list-view .ddoc-name{font-size:.6rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #driver-grid.list-view .ddoc-icon{font-size:.95rem}
 #driver-grid.list-view .ddoc-status{font-size:.64rem}
-#driver-grid.list-view .dcard-footer{flex:0 0 148px;border-top:none;border-left:1px solid var(--bd);background:transparent;padding:.5rem .85rem;justify-content:center;flex-direction:column;align-items:flex-start;gap:.18rem}
+/* COL 5 — Estado */
+#driver-grid.list-view .dcard-footer{grid-column:5;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:.18rem;padding:.5rem .85rem;border-top:none;border-left:1px solid var(--bd)}
 #driver-grid.list-view .dexp{font-size:.62rem}
-/* list header card — lives inside #driver-grid, hidden in card mode */
+/* Header row */
 #list-hdr-card{display:none}
-#driver-grid.list-view #list-hdr-card{display:flex;align-items:stretch;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}
-#list-hdr-card .dcard-top{background:transparent;border-bottom:none;border-right:1px solid rgba(255,255,255,.08)}
-#list-hdr-card .dcard-docs{display:grid;grid-template-columns:repeat(3,1fr)}
-#list-hdr-card .ddoc{border-bottom:none;border-right:1px solid rgba(255,255,255,.08);flex-direction:column;align-items:center;justify-content:center;padding:.45rem .6rem}
-#list-hdr-card .ddoc:last-child{border-right:none}
-#list-hdr-card .dcard-footer{background:transparent;border-top:none;border-left:1px solid rgba(255,255,255,.08);justify-content:center}
+#driver-grid.list-view>#list-hdr-card{display:grid;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
+#driver-grid.list-view #list-hdr-card .dcard-top{background:transparent;border-right-color:rgba(255,255,255,.08);justify-content:center}
+#driver-grid.list-view #list-hdr-card .ddoc{border-right-color:rgba(255,255,255,.1)}
+#driver-grid.list-view #list-hdr-card .dcard-footer{border-left-color:rgba(255,255,255,.08);align-items:center;justify-content:center}
 .lhdr{font-size:.6rem;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;text-align:center}
 </style>
 </head>
@@ -315,7 +318,7 @@ let CFG = {
   endpoint: localStorage.getItem('vf_endpoint') || ''
 };
 const MDL = 'claude-sonnet-4-6';
-const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT = 1; // Sequential: avoids Anthropic API rate limits (429)
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 const DRIVERS = {};   // { cpf: { name, cpf, photo, docs:{cnh,tox,train}, el } }
@@ -606,35 +609,40 @@ Reglas:
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
 - null para campos no visibles`;
 
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': K,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: MDL, max_tokens: 600,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageB64 } },
-            { type: 'text', text: prompt }
-          ]
-        }]
-      })
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    const raw = data.content[0].text.trim();
-    const clean = raw.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
-  } catch (e) {
-    log('Claude error: ' + e.message);
-    return null;
+  const body = JSON.stringify({
+    model: MDL, max_tokens: 600,
+    messages: [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageB64 } },
+      { type: 'text', text: prompt }
+    ]}]
+  });
+  const headers = {
+    'x-api-key': K, 'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+    'anthropic-dangerous-direct-browser-access': 'true'
+  };
+  // Retry up to 4 times on 429 (rate limit) with exponential backoff
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      if (attempt > 0) {
+        const wait = Math.pow(2, attempt) * 5000; // 10s, 20s, 40s
+        log(`Rate limit — reintentando en ${wait/1000}s (intento ${attempt+1}/4)…`);
+        await new Promise(r => setTimeout(r, wait));
+      }
+      const resp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body });
+      if (resp.status === 429) { continue; } // rate limited → retry
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      const raw = data.content[0].text.trim();
+      const clean = raw.replace(/```json|```/g, '').trim();
+      return JSON.parse(clean);
+    } catch (e) {
+      log('Claude error: ' + e.message);
+      if (attempt === 3) return null;
+    }
   }
+  log('Claude error: limite de intentos alcanzado');
+  return null;
 }
 
 // ─── APPLY RESULT TO DRIVER ───────────────────────────────────────────────────
