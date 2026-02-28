@@ -621,16 +621,19 @@ Reglas:
     'content-type': 'application/json',
     'anthropic-dangerous-direct-browser-access': 'true'
   };
-  // Retry up to 4 times on 429 (rate limit) with exponential backoff
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Retry up to 5 times on 429 — respects retry-after header (Anthropic resets every ~60s)
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      if (attempt > 0) {
-        const wait = Math.pow(2, attempt) * 5000; // 10s, 20s, 40s
-        log(`Rate limit — reintentando en ${wait/1000}s (intento ${attempt+1}/4)…`);
-        await new Promise(r => setTimeout(r, wait));
-      }
       const resp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body });
-      if (resp.status === 429) { continue; } // rate limited → retry
+      if (resp.status === 429) {
+        if (attempt >= 4) { log('Rate limit: máximo de reintentos alcanzado'); return null; }
+        // Respect the retry-after header; fall back to 65s if not present
+        const retryAfter = parseInt(resp.headers.get('retry-after') || '65', 10);
+        const waitSec = Math.max(retryAfter, 15); // always wait at least 15s
+        log(`⏳ Rate limit — reintentando en ${waitSec}s (intento ${attempt+1}/5)…`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue;
+      }
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       const raw = data.content[0].text.trim();
@@ -638,10 +641,9 @@ Reglas:
       return JSON.parse(clean);
     } catch (e) {
       log('Claude error: ' + e.message);
-      if (attempt === 3) return null;
+      if (attempt >= 4) return null;
     }
   }
-  log('Claude error: limite de intentos alcanzado');
   return null;
 }
 
