@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VecFleet · Alta Masiva de Choferes</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--p:#8D33FF;--c:#41EBD4;--bg:#070912;--s:#111827;--s2:#1C2535;--bd:rgba(141,51,255,.18);--t:#F1F5F9;--tm:#64748B;--g:#22C55E;--r:#EF4444;--y:#F59E0B;--o:#F97316;}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -145,9 +146,8 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .btn-view:hover{border-color:var(--p);color:var(--t)}
 .btn-view.active{background:rgba(141,51,255,.15);border-color:var(--p);color:var(--p)}
 
-/* LIST VIEW — CSS Subgrid: each card spans all 5 tracks, inheriting exact column widths */
-#driver-grid.list-view{grid-template-columns:215px 1fr 1fr 1fr 148px !important;gap:4px 0 !important}
-/* Each card spans full width and uses subgrid to inherit parent column tracks */
+/* LIST VIEW — CSS Subgrid: each card spans all 6 tracks */
+#driver-grid.list-view{grid-template-columns:215px 1fr 1fr 1fr 120px 120px !important;gap:4px 0 !important}
 #driver-grid.list-view>.dcard,#driver-grid.list-view>#list-hdr-card{grid-column:1/-1;display:grid;grid-template-columns:subgrid;border-radius:10px}
 /* dcard-docs spans middle 3 columns (2-4) with its own subgrid */
 #driver-grid.list-view .dcard-docs{grid-column:2/5;display:grid;grid-template-columns:subgrid;padding:0;border-bottom:none}
@@ -162,16 +162,31 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 #driver-grid.list-view .ddoc-name{font-size:.6rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #driver-grid.list-view .ddoc-icon{font-size:.95rem}
 #driver-grid.list-view .ddoc-status{font-size:.64rem}
-/* COL 5 — Estado */
-#driver-grid.list-view .dcard-footer{grid-column:5;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:.18rem;padding:.5rem .85rem;border-top:none;border-left:1px solid var(--bd)}
+/* COL 5 — Persona badge */
+#driver-grid.list-view .dcard-footer{grid-column:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.18rem;padding:.5rem .6rem;border-top:none;border-left:1px solid var(--bd)}
 #driver-grid.list-view .dexp{font-size:.62rem}
+/* COL 6 — Usuario badge */
+#driver-grid.list-view .dcard-usuario{grid-column:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.18rem;padding:.5rem .6rem;border-top:none;border-left:1px solid var(--bd)}
 /* Header row */
 #list-hdr-card{display:none}
 #driver-grid.list-view>#list-hdr-card{display:grid;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
 #driver-grid.list-view #list-hdr-card .dcard-top{background:transparent;border-right-color:rgba(255,255,255,.08);justify-content:center}
 #driver-grid.list-view #list-hdr-card .ddoc{border-right-color:rgba(255,255,255,.1)}
-#driver-grid.list-view #list-hdr-card .dcard-footer{border-left-color:rgba(255,255,255,.08);align-items:center;justify-content:center}
+#driver-grid.list-view #list-hdr-card .dcard-footer,#driver-grid.list-view #list-hdr-card .dcard-usuario{border-left-color:rgba(255,255,255,.08);align-items:center;justify-content:center}
 .lhdr{font-size:.6rem;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.07em;text-align:center}
+/* Badge styles */
+.badge{font-size:.62rem;font-weight:700;padding:.2rem .5rem;border-radius:6px;text-align:center;white-space:nowrap}
+.badge.ok{background:rgba(34,197,94,.12);color:var(--g);border:1px solid rgba(34,197,94,.25)}
+.badge.warn{background:rgba(245,158,11,.1);color:var(--y);border:1px solid rgba(245,158,11,.25)}
+.badge.pend{background:rgba(100,116,139,.1);color:var(--tm);border:1px solid rgba(100,116,139,.2)}
+.badge.err{background:rgba(239,68,68,.1);color:var(--r);border:1px solid rgba(239,68,68,.2)}
+/* Excel entry tag */
+.dcard.from-excel .dcard-top{border-left:3px solid var(--c)}
+.excel-src{font-size:.58rem;color:var(--c);opacity:.7}
+/* Stats grid 6 cols */
+.stats{grid-template-columns:repeat(6,1fr) !important}
+/* Excel tag */
+.uz-tag.xls{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25);color:var(--g)}
 </style>
 </head>
 <body>
@@ -230,7 +245,7 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 
   <!-- UPLOAD ZONE -->
   <div class="upload-zone" id="upzone" ondragover="onDrag(event)" ondragleave="onUndrag()" ondrop="onDrop(event)">
-    <input type="file" accept="image/*,application/pdf" multiple id="file-input" onchange="onFiles(event)">
+    <input type="file" accept="image/*,application/pdf,.xlsx,.xls" multiple id="file-input" onchange="onFiles(event)">
     <div class="uz-icon">📂</div>
     <div class="uz-title">Arrastrá archivos o hacé click para seleccionar</div>
     <div class="uz-sub">Podés subir todos los documentos juntos o de a uno — Eric detecta el tipo automáticamente</div>
@@ -241,6 +256,7 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
       <span class="uz-tag pdf">PDF</span>
       <span class="uz-tag pdf">JPG</span>
       <span class="uz-tag pdf">PNG</span>
+      <span class="uz-tag xls">📊 Excel</span>
     </div>
   </div>
 
@@ -252,10 +268,11 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 
   <!-- STATS -->
   <div class="stats" id="stats-bar" style="display:none">
-    <div class="stat"><div class="stat-num" id="st-total">0</div><div class="stat-lbl">Choferes</div></div>
+    <div class="stat"><div class="stat-num" id="st-total">0</div><div class="stat-lbl">Personas</div></div>
     <div class="stat"><div class="stat-num" id="st-files">0</div><div class="stat-lbl">Archivos</div></div>
-    <div class="stat"><div class="stat-num green" id="st-apto">0</div><div class="stat-lbl">Aptos</div></div>
-    <div class="stat"><div class="stat-num red" id="st-inapto">0</div><div class="stat-lbl">No Aptos</div></div>
+    <div class="stat"><div class="stat-num green" id="st-apto">0</div><div class="stat-lbl">Docs OK</div></div>
+    <div class="stat"><div class="stat-num" id="st-persona">0</div><div class="stat-lbl">Crear Persona</div></div>
+    <div class="stat"><div class="stat-num" id="st-usuario">0</div><div class="stat-lbl">Crear Usuario</div></div>
     <div class="stat"><div class="stat-num yellow" id="st-pend">0</div><div class="stat-lbl">Pendientes</div></div>
   </div>
 
@@ -287,7 +304,8 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
         <div class="ddoc"><span class="lhdr">Toxicológico</span></div>
         <div class="ddoc"><span class="lhdr">Entrenamiento</span></div>
       </div>
-      <div class="dcard-footer"><span class="lhdr">Estado</span></div>
+      <div class="dcard-footer"><span class="lhdr">Persona</span></div>
+      <div class="dcard-usuario"><span class="lhdr">Usuario</span></div>
     </div>
   </div>
 
@@ -322,7 +340,9 @@ const MAX_CONCURRENT = 1; // Sequential: avoids Anthropic API rate limits (429)
 const API_THROTTLE_MS = 4500; // Min ms between API calls — keeps rate well below API limits
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
-const DRIVERS = {};   // { cpf: { name, cpf, photo, docs:{cnh,tox,train}, el } }
+const DRIVERS = {};   // { key: { name, cpf, photo, docs:{cnh,tox,train}, email, transportadora, ... } }
+const EXCEL_POOL = {};    // { cnhNum: excelRowData }
+const EXCEL_BY_NAME = {}; // { normalizedName: excelRowData } — fallback matching
 let QUEUE = [];
 let ACTIVE = 0;
 let TOTAL_FILES = 0;
@@ -378,24 +398,123 @@ function onDrag(e) { e.preventDefault(); document.getElementById('upzone').class
 function onUndrag() { document.getElementById('upzone').classList.remove('drag'); }
 function onDrop(e) {
   e.preventDefault(); onUndrag();
-  const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
-  if (files.length) handleFiles(files);
+  handleFiles([...e.dataTransfer.files]);
 }
 function onFiles(e) { handleFiles([...e.target.files]); e.target.value = ''; }
 
+function isExcel(f) { return f.name.match(/\.xlsx?$/i) || f.type.includes('spreadsheet'); }
+
 function handleFiles(files) {
-  if (!K) { showKeyModal(); return; }
+  const excelFiles = files.filter(isExcel);
+  const docFiles = files.filter(f => !isExcel(f) && (f.type.startsWith('image/') || f.type === 'application/pdf'));
+
+  excelFiles.forEach(f => processExcel(f));
+
+  if (docFiles.length) {
+    if (!K) { showKeyModal(); return; }
+    showGrid();
+    TOTAL_FILES += docFiles.length;
+    docFiles.forEach(f => QUEUE.push(f));
+    updateQueueBar();
+    for (let i = 0; i < MAX_CONCURRENT; i++) processNext();
+  } else if (excelFiles.length) {
+    showGrid();
+  }
+}
+
+function showGrid() {
   document.getElementById('empty').style.display = 'none';
   document.getElementById('stats-bar').style.display = '';
   document.getElementById('grid-header').style.display = '';
-  // Apply default list view on first load
   if (!document.getElementById('driver-grid').classList.contains('list-view')) {
     document.getElementById('driver-grid').classList.add('list-view');
   }
-  TOTAL_FILES += files.length;
-  files.forEach(f => QUEUE.push(f));
-  updateQueueBar();
-  for (let i = 0; i < MAX_CONCURRENT; i++) processNext();
+}
+
+// ─── EXCEL PROCESSING ─────────────────────────────────────────────────────────
+function normalizeName(name) {
+  return String(name || '').toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+function findDriverCpfByName(name) {
+  const norm = normalizeName(name);
+  return Object.keys(DRIVERS).find(k => !k.startsWith('EX_') && normalizeName(DRIVERS[k].name) === norm) || null;
+}
+
+function mergeExcelData(key, ex) {
+  const d = DRIVERS[key];
+  if (!d) return;
+  d.email = d.email || ex.email || null;
+  d.transportadora = d.transportadora || ex.transportadora || null;
+  d.base = d.base || ex.base || null;
+  d.perfil = d.perfil || ex.perfil || null;
+  d.categoria = d.categoria || ex.categoria || null;
+  d.cnh_num = d.cnh_num || ex.cnh_num || null;
+  d.es_usuario = d.es_usuario || ex.es_usuario || false;
+  d.fromExcel = true;
+  if (d.el) d.el.classList.add('from-excel');
+  updateCard(key);
+}
+
+async function processExcel(file) {
+  log('Procesando Excel: ' + file.name);
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    let added = 0, matched = 0;
+    rows.forEach(row => {
+      const cnhNum = String(row['documento_numero'] || '').replace(/\s/g,'').trim();
+      const name = [row['nome'], row['sobrenome']].filter(Boolean).join(' ').trim().toUpperCase();
+      if (!cnhNum && !name) return;
+
+      const ex = {
+        name,
+        email: row['email'] || null,
+        transportadora: row['Transportadora'] || null,
+        base: row['base'] || null,
+        perfil: row['perfil'] || null,
+        categoria: row['Categoria'] || null,
+        cnh_num: cnhNum,
+        rg: String(row['legajo_numero (RG)'] || ''),
+        es_usuario: String(row['es_usuario'] || '').toLowerCase() === 'si',
+      };
+
+      if (cnhNum) EXCEL_POOL[cnhNum] = ex;
+      if (name) EXCEL_BY_NAME[normalizeName(name)] = ex;
+
+      // Try to match to an already-processed CPF driver by name
+      const existingCpf = findDriverCpfByName(name);
+      if (existingCpf) {
+        mergeExcelData(existingCpf, ex);
+        matched++;
+        return;
+      }
+
+      // Create Excel-only pending entry
+      const exKey = 'EX_' + (cnhNum || normalizeName(name));
+      if (!DRIVERS[exKey]) {
+        DRIVERS[exKey] = {
+          name, cpf: null, exKey, photo: null,
+          docs: { cnh: null, tox: null, train: null },
+          el: null, fromExcel: true, ...ex
+        };
+        createCard(exKey);
+        added++;
+      }
+    });
+
+    updateStats();
+    log(`Excel: ${added} nuevas personas, ${matched} enlazadas con docs existentes`);
+    toast(`✓ Excel importado: ${rows.length} personas (${matched} ya con docs procesados)`);
+  } catch(e) {
+    log('Error al leer Excel: ' + e.message);
+    toast('Error al leer el Excel: ' + e.message, 'err');
+  }
 }
 
 async function processNext() {
@@ -598,7 +717,7 @@ TIPOS POSIBLES:
 
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
-Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","status":"VALID_OR_EXPIRED"}
+Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","registro":"","status":"VALID_OR_EXPIRED"}
 Para TOXICOLOGY: {"type":"TOXICOLOGY","name":"","cpf":"","result":"NEGATIVE_OR_POSITIVE","validity_date":"","collection_date":"","lab":"","is_valid":true}
 Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"","completion_date":""}
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
@@ -608,6 +727,7 @@ Reglas:
 - Fechas en formato YYYY-MM-DD
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
+- registro CNH: Nº Registro (Renach) que aparece en la CNH — solo dígitos, sin puntos ni espacios, o null
 - null para campos no visibles`;
 
   const body = JSON.stringify({
@@ -661,7 +781,12 @@ function applyResult(result, previewUrl, facePhoto) {
 
   // Create driver if new
   if (!DRIVERS[cpf]) {
-    DRIVERS[cpf] = { name: result.name || '—', cpf, photo: null, docs: { cnh: null, tox: null, train: null }, el: null };
+    DRIVERS[cpf] = {
+      name: result.name || '—', cpf, photo: null,
+      docs: { cnh: null, tox: null, train: null }, el: null,
+      email: null, transportadora: null, base: null, perfil: null,
+      categoria: null, cnh_num: null, es_usuario: false, fromExcel: false
+    };
     createCard(cpf);
   }
 
@@ -670,13 +795,30 @@ function applyResult(result, previewUrl, facePhoto) {
 
   if (result.type === 'CNH') {
     driver.docs.cnh = result;
-    if (!driver.photo) {
-      driver.photo = facePhoto || null; // null = show initials
+    if (result.registro) driver.cnh_num = result.registro;
+    if (!driver.photo) driver.photo = facePhoto || null;
+
+    // Try to match Excel data by Nº Registro or name
+    const exData = (result.registro && EXCEL_POOL[result.registro])
+      || EXCEL_BY_NAME[normalizeName(result.name || '')];
+    if (exData) {
+      mergeExcelData(cpf, exData);
+      // Remove the Excel-only pending card if it exists
+      const exKey = 'EX_' + (exData.cnh_num || normalizeName(exData.name));
+      if (DRIVERS[exKey]) {
+        if (DRIVERS[exKey].el) DRIVERS[exKey].el.remove();
+        delete DRIVERS[exKey];
+      }
     }
   } else if (result.type === 'TOXICOLOGY') {
     driver.docs.tox = result;
   } else if (result.type === 'TRAINING') {
     driver.docs.train = result;
+    // Also try name matching for training (no cnhnum available)
+    if (!driver.fromExcel) {
+      const exData = EXCEL_BY_NAME[normalizeName(result.name || '')];
+      if (exData) mergeExcelData(cpf, exData);
+    }
   }
 
   updateCard(cpf);
@@ -740,15 +882,19 @@ function createCard(cpf) {
 
 function cardHTML(cpf) {
   const d = DRIVERS[cpf];
+  const safeId = cpf.replace(/\W/g,'_');
   const initials = (d.name || '??').split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase();
   const photo = d.photo ? `<img src="${d.photo}" alt="">` : initials;
+  const subtitle = d.cpf ? d.cpf : (d.cnh_num ? 'CNH ' + d.cnh_num : '');
+  const excelSrc = d.fromExcel ? `<span class="excel-src">📊 Excel</span>` : '';
   return `
     <div class="dcard-top">
-      <div class="dcard-check" id="chk-${cpf.replace(/\D/g,'')}" onclick="toggleSelect('${cpf}')"></div>
-      <div class="davatar" id="av-${cpf.replace(/\D/g,'')}">${photo}</div>
+      <div class="dcard-check" id="chk-${safeId}" onclick="toggleSelect('${cpf}')"></div>
+      <div class="davatar" id="av-${safeId}">${photo}</div>
       <div class="dinfo">
-        <div class="dname" id="dn-${cpf.replace(/\D/g,'')}">${d.name}</div>
-        <div class="dcpf">${cpf}</div>
+        <div class="dname" id="dn-${safeId}">${d.name}</div>
+        <div class="dcpf">${subtitle}</div>
+        ${excelSrc}
       </div>
     </div>
     <div class="dcard-docs">
@@ -757,13 +903,17 @@ function cardHTML(cpf) {
       ${docRow('train','🎓','Entrenamiento',cpf)}
     </div>
     <div class="dcard-footer">
-      <div class="dstatus procesando" id="ds-${cpf.replace(/\D/g,'')}">${statusLabel('procesando')}</div>
-      <div class="dexp" id="de-${cpf.replace(/\D/g,'')}"></div>
+      <div class="dstatus procesando" id="ds-${safeId}">${statusLabel('procesando')}</div>
+      <div class="dexp" id="de-${safeId}"></div>
+    </div>
+    <div class="dcard-usuario">
+      <div id="du-${safeId}" class="badge pend">—</div>
+      <div id="due-${safeId}" class="dexp"></div>
     </div>`;
 }
 
 function docRow(type, icon, label, cpf) {
-  const id = cpf.replace(/\D/g,'');
+  const id = cpf.replace(/\W/g,'_');
   return `<div class="ddoc">
     <div class="ddoc-icon">${icon}</div>
     <div class="ddoc-name">${label}</div>
@@ -773,11 +923,20 @@ function docRow(type, icon, label, cpf) {
 
 function updateCard(cpf) {
   const d = DRIVERS[cpf];
-  const id = cpf.replace(/\D/g,'');
+  const id = cpf.replace(/\W/g,'_');
 
   // Update name
   const dn = document.getElementById('dn-' + id);
   if (dn) dn.textContent = d.name;
+
+  // Update subtitle (CPF or CNH num)
+  const subtitleEl = dn && dn.nextElementSibling;
+  if (subtitleEl && subtitleEl.classList.contains('dcpf')) {
+    subtitleEl.textContent = d.cpf ? d.cpf : (d.cnh_num ? 'CNH ' + d.cnh_num : '');
+  }
+
+  // Excel tag
+  if (d.fromExcel && d.el) d.el.classList.add('from-excel');
 
   // Update photo
   if (d.photo) {
@@ -790,32 +949,63 @@ function updateCard(cpf) {
   updateDocRow('tox', cpf, d.docs.tox);
   updateDocRow('train', cpf, d.docs.train);
 
-  // Overall status
+  // Overall status (persona docs status)
   const status = driverStatus(cpf);
   const ds = document.getElementById('ds-' + id);
   if (ds) { ds.className = 'dstatus ' + status; ds.innerHTML = statusLabel(status); }
 
   // Expiry info
   const de = document.getElementById('de-' + id);
-  if (de && d.docs.cnh && d.docs.cnh.validity) de.textContent = 'CNH vence: ' + d.docs.cnh.validity;
+  if (de && d.docs.cnh && d.docs.cnh.validity) de.textContent = 'CNH: ' + d.docs.cnh.validity;
+
+  // Usuario badge
+  updateUsuarioBadge(cpf, status);
 
   // Card border
-  if (d.el) {
-    d.el.classList.remove('apto-card','inapto-card');
-  }
+  if (d.el) d.el.classList.remove('apto-card','inapto-card');
 
-  // Show/hide checkbox based on status
+  // Checkbox only enabled when apto
   const chk = document.getElementById('chk-' + id);
-  if (chk) {
-    if (status !== 'apto') chk.classList.add('disabled');
-    else chk.classList.remove('disabled');
-  }
+  if (chk) chk.classList.toggle('disabled', status !== 'apto');
 
   applyFilter(d.el, status);
 }
 
+function updateUsuarioBadge(cpf, status) {
+  const d = DRIVERS[cpf];
+  const id = cpf.replace(/\W/g,'_');
+  const duEl = document.getElementById('du-' + id);
+  const dueEl = document.getElementById('due-' + id);
+  if (!duEl) return;
+
+  const usrStatus = userReadyStatus(cpf, status);
+  const labels = {
+    listo:      { cls: 'ok',   txt: '✓ LISTO' },
+    falta_docs: { cls: 'pend', txt: '⏳ Docs pendientes' },
+    no_apto:    { cls: 'err',  txt: '✗ No apto' },
+    falta_email:{ cls: 'warn', txt: '⚠ Sin email' },
+    falta_datos:{ cls: 'warn', txt: '⚠ Falta datos' },
+    sin_datos:  { cls: 'pend', txt: '— Sin datos Excel' },
+  };
+  const { cls, txt } = labels[usrStatus] || labels.sin_datos;
+  duEl.className = 'badge ' + cls;
+  duEl.textContent = txt;
+  if (dueEl) dueEl.textContent = d.email ? d.email.split('@')[0] + '…' : '';
+}
+
+function userReadyStatus(cpf, docStatus) {
+  const d = DRIVERS[cpf];
+  docStatus = docStatus || driverStatus(cpf);
+  if (!d.fromExcel && !d.email) return 'sin_datos';
+  if (docStatus === 'inapto') return 'no_apto';
+  if (docStatus !== 'apto') return 'falta_docs';
+  if (!d.email) return 'falta_email';
+  if (!d.transportadora) return 'falta_datos';
+  return 'listo';
+}
+
 function updateDocRow(type, cpf, doc) {
-  const id = cpf.replace(/\D/g,'');
+  const id = cpf.replace(/\W/g,'_');
   const el = document.getElementById('dr-' + type + '-' + id);
   if (!el) return;
   if (!doc) { el.className = 'ddoc-status pending'; el.textContent = '— Pendiente'; return; }
@@ -845,18 +1035,19 @@ function statusLabel(s) {
 
 // ─── STATS ────────────────────────────────────────────────────────────────────
 function updateStats() {
-  const cpfs = Object.keys(DRIVERS);
-  let apto=0, inapto=0, pend=0;
-  cpfs.forEach(c => {
-    const s = driverStatus(c);
-    if (s==='apto') apto++;
-    else if (s==='inapto') inapto++;
+  const keys = Object.keys(DRIVERS);
+  let apto=0, pend=0, personaListo=0, usuarioListo=0;
+  keys.forEach(k => {
+    const s = driverStatus(k);
+    if (s==='apto') { apto++; personaListo++; }
     else pend++;
+    if (userReadyStatus(k, s) === 'listo') usuarioListo++;
   });
-  document.getElementById('st-total').textContent = cpfs.length;
+  document.getElementById('st-total').textContent = keys.length;
   document.getElementById('st-files').textContent = DONE_FILES;
   document.getElementById('st-apto').textContent = apto;
-  document.getElementById('st-inapto').textContent = inapto;
+  document.getElementById('st-persona').textContent = personaListo;
+  document.getElementById('st-usuario').textContent = usuarioListo;
   document.getElementById('st-pend').textContent = pend;
   updateActionBar();
 }
@@ -881,7 +1072,7 @@ const SELECTED = new Set();
 
 function toggleSelect(cpf) {
   if (driverStatus(cpf) !== 'apto') return;
-  const id = cpf.replace(/\D/g,'');
+  const id = cpf.replace(/\W/g,'_');
   const chk = document.getElementById('chk-' + id);
   const card = DRIVERS[cpf].el;
   if (SELECTED.has(cpf)) {
@@ -921,12 +1112,22 @@ async function uploadSelected() {
     return {
       name: d.name,
       cpf: d.cpf,
+      // Persona data
       documents: {
         cnh: d.docs.cnh,
         toxicology: d.docs.tox,
         training: d.docs.train
       },
       status: 'APTO',
+      // Usuario data (from Excel or manual)
+      usuario: d.es_usuario ? {
+        email: d.email,
+        transportadora: d.transportadora,
+        base: d.base,
+        perfil: d.perfil,
+        categoria: d.categoria,
+        cnh_num: d.cnh_num,
+      } : null,
       uploaded_at: new Date().toISOString()
     };
   });
