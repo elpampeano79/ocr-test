@@ -188,6 +188,9 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 /* CPF collision warning */
 .dcard.cpf-collision{outline:2px solid var(--y) !important;outline-offset:-2px}
 .dcard.cpf-collision .dcard-top::after{content:'⚠ CPF duplicado — revisá el OCR';font-size:.58rem;color:var(--y);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:5px;padding:.15rem .45rem;margin-left:auto;white-space:nowrap}
+/* CPF unreadable warning */
+.dcard.cpf-unreadable{outline:2px solid var(--r) !important;outline-offset:-2px}
+.dcard.cpf-unreadable .dcard-top::after{content:'⚠ CPF no legible — abrí el doc para verificar';font-size:.58rem;color:var(--r);background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:5px;padding:.15rem .45rem;margin-left:auto;white-space:nowrap}
 .excel-src{font-size:.58rem;color:var(--c);opacity:.7}
 /* Stats grid 6 cols */
 .stats{grid-template-columns:repeat(6,1fr) !important}
@@ -430,9 +433,9 @@ let CFG = {
   months: parseInt(localStorage.getItem('vf_months') || '12'),
   endpoint: localStorage.getItem('vf_endpoint') || ''
 };
-const MDL = 'claude-haiku-4-5-20251001'; // Haiku: 5-10x higher rate limits vs Sonnet, great for OCR
+const MDL = 'claude-sonnet-4-5-20250929'; // Sonnet: mejor precisión OCR para datos sensibles (CPF, fechas)
 const MAX_CONCURRENT = 1; // Sequential: avoids Anthropic API rate limits (429)
-const API_THROTTLE_MS = 4500; // Min ms between API calls — keeps rate well below API limits
+const API_THROTTLE_MS = 6000; // Sonnet tiene límites más bajos — 6s entre llamadas para mayor seguridad
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 const DRIVERS = {};   // { key: { name, cpf, photo, docs:{cnh,tox,train}, email, transportadora, ... } }
@@ -886,7 +889,39 @@ function applyResult(result, previewUrl, facePhoto) {
   }
 
   const cpf = normalizeCpf(result.cpf);
-  if (!cpf) { log('Sin CPF — documento ignorado'); return; }
+
+  // CPF unreadable: don't discard — create a temp entry so the user can review it
+  if (!cpf) {
+    const tmpName = normalizeName(result.name || '');
+    const tmpKey = 'NOCPF_' + (tmpName || Date.now());
+    log(`⚠ CPF no legible para "${result.name || 'desconocido'}" — entrada temporal creada`);
+    toast(`⚠ CPF no legible para "${result.name || 'doc'}" — hacé click en CNH para verificar`, 'warn');
+    if (!DRIVERS[tmpKey]) {
+      DRIVERS[tmpKey] = {
+        name: result.name || '—', cpf: tmpKey, photo: null,
+        docs: { cnh: null, tox: null, train: null }, el: null,
+        email: null, transportadora: null, base: null, perfil: null,
+        categoria: null, cnh_num: null, es_usuario: false, fromExcel: false,
+        cpfUnreadable: true
+      };
+      createCard(tmpKey);
+    }
+    const tmpDriver = DRIVERS[tmpKey];
+    if (result.name && result.name.length > 2) tmpDriver.name = result.name;
+    result._preview = previewUrl;
+    if (result.type === 'CNH') {
+      tmpDriver.docs.cnh = result;
+      if (!tmpDriver.photo) tmpDriver.photo = facePhoto || null;
+    } else if (result.type === 'TOXICOLOGY') {
+      tmpDriver.docs.tox = result;
+    } else if (result.type === 'TRAINING') {
+      tmpDriver.docs.train = result;
+    }
+    if (tmpDriver.el) tmpDriver.el.classList.add('cpf-unreadable');
+    updateCard(tmpKey);
+    updateStats();
+    return;
+  }
 
   // Create driver if new
   if (!DRIVERS[cpf]) {
