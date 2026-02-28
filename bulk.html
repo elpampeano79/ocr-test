@@ -205,8 +205,14 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .ocr-close{background:none;border:none;color:var(--tm);font-size:1.1rem;cursor:pointer;padding:.2rem .5rem;border-radius:6px;transition:color .15s}
 .ocr-close:hover{color:var(--t)}
 .ocr-modal-body{display:grid;grid-template-columns:1fr 1fr;flex:1;overflow:hidden;min-height:0}
-.ocr-img-side{background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:1.2rem;overflow:auto;border-right:1px solid rgba(255,255,255,.07)}
-.ocr-img-side img{max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain}
+.ocr-img-side{background:#0a0e1a;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,.07);overflow:hidden;position:relative}
+.ocr-zoom-wrap{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:grab;user-select:none;position:relative}
+.ocr-zoom-wrap.grabbing{cursor:grabbing}
+.ocr-zoom-wrap img{transform-origin:0 0;border-radius:6px;max-width:none;pointer-events:none;will-change:transform}
+.ocr-zoom-bar{display:flex;align-items:center;gap:.5rem;justify-content:center;padding:.5rem;border-top:1px solid rgba(255,255,255,.06);flex-shrink:0;background:#0a0e1a}
+.ocr-zoom-bar button{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:var(--t);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:.95rem;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.ocr-zoom-bar button:hover{background:rgba(141,51,255,.25)}
+.ocr-zoom-bar span{font-size:.72rem;color:var(--tm);min-width:38px;text-align:center}
 .ocr-fields-side{padding:1.2rem 1.4rem;overflow-y:auto}
 .ocr-fields-title{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--tm);margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid rgba(255,255,255,.06)}
 .ocr-field{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.04)}
@@ -376,8 +382,16 @@ main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
         <button class="ocr-close" onclick="closeOcrModal(null)">✕</button>
       </div>
       <div class="ocr-modal-body">
-        <div class="ocr-img-side">
-          <img id="ocr-img" src="" alt="Documento original">
+        <div class="ocr-img-side" id="ocr-img-side">
+          <div class="ocr-zoom-wrap" id="ocr-zoom-wrap">
+            <img id="ocr-img" src="" alt="Documento original" draggable="false">
+          </div>
+          <div class="ocr-zoom-bar">
+            <button onclick="zoomDoc(-0.25)" title="Alejar">−</button>
+            <span id="ocr-zoom-pct">100%</span>
+            <button onclick="zoomDoc(+0.25)" title="Acercar">+</button>
+            <button onclick="resetZoom()" title="Restablecer">⊡</button>
+          </div>
         </div>
         <div class="ocr-fields-side">
           <div class="ocr-fields-title">Campos extraídos por OCR</div>
@@ -1336,9 +1350,99 @@ function closeOcrModal(e) {
   if (e && e.target !== document.getElementById('ocr-modal')) return;
   document.getElementById('ocr-modal').classList.remove('on');
   document.body.style.overflow = '';
+  resetZoom();
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeOcrModal(null); });
+
+// ─── ZOOM / PAN ────────────────────────────────────────────────────────────────
+let _z = 1, _tx = 0, _ty = 0;   // zoom scale, translate x/y
+let _dragging = false, _dx = 0, _dy = 0;
+
+function _applyTransform() {
+  const img = document.getElementById('ocr-img');
+  if (!img) return;
+  // Center the image in its container, then apply scale + pan offset
+  const wrap = document.getElementById('ocr-zoom-wrap');
+  const ww = wrap.clientWidth, wh = wrap.clientHeight;
+  const iw = img.naturalWidth || img.clientWidth;
+  const ih = img.naturalHeight || img.clientHeight;
+  // Fit-to-container base scale
+  const baseScale = Math.min(ww / iw, wh / ih, 1);
+  const scale = baseScale * _z;
+  const cx = (ww - iw * scale) / 2;
+  const cy = (wh - ih * scale) / 2;
+  img.style.transform = `translate(${cx + _tx}px, ${cy + _ty}px) scale(${scale})`;
+  document.getElementById('ocr-zoom-pct').textContent = Math.round(_z * 100) + '%';
+}
+
+function zoomDoc(delta) {
+  _z = Math.min(Math.max(_z + delta, 0.5), 6);
+  _applyTransform();
+}
+
+function resetZoom() {
+  _z = 1; _tx = 0; _ty = 0;
+  _applyTransform();
+}
+
+// Mouse wheel zoom
+document.getElementById('ocr-zoom-wrap').addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY < 0 ? 0.15 : -0.15;
+  _z = Math.min(Math.max(_z + delta, 0.5), 6);
+  _applyTransform();
+}, { passive: false });
+
+// Double-click to reset
+document.getElementById('ocr-zoom-wrap').addEventListener('dblclick', () => resetZoom());
+
+// Drag to pan
+document.getElementById('ocr-zoom-wrap').addEventListener('mousedown', e => {
+  if (_z <= 1) return;
+  _dragging = true; _dx = e.clientX - _tx; _dy = e.clientY - _ty;
+  document.getElementById('ocr-zoom-wrap').classList.add('grabbing');
+});
+document.addEventListener('mousemove', e => {
+  if (!_dragging) return;
+  _tx = e.clientX - _dx; _ty = e.clientY - _dy;
+  _applyTransform();
+});
+document.addEventListener('mouseup', () => {
+  _dragging = false;
+  document.getElementById('ocr-zoom-wrap')?.classList.remove('grabbing');
+});
+
+// Touch pinch-to-zoom + drag
+let _lastTouchDist = null, _lastTouchMid = null;
+document.getElementById('ocr-zoom-wrap').addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    const [a, b] = e.touches;
+    _lastTouchDist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    _lastTouchMid = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+  } else if (e.touches.length === 1 && _z > 1) {
+    _dragging = true; _dx = e.touches[0].clientX - _tx; _dy = e.touches[0].clientY - _ty;
+  }
+}, { passive: true });
+document.getElementById('ocr-zoom-wrap').addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 2 && _lastTouchDist) {
+    const [a, b] = e.touches;
+    const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    _z = Math.min(Math.max(_z * (dist / _lastTouchDist), 0.5), 6);
+    _lastTouchDist = dist;
+    _applyTransform();
+  } else if (e.touches.length === 1 && _dragging) {
+    _tx = e.touches[0].clientX - _dx; _ty = e.touches[0].clientY - _dy;
+    _applyTransform();
+  }
+}, { passive: false });
+document.getElementById('ocr-zoom-wrap').addEventListener('touchend', () => {
+  _lastTouchDist = null; _dragging = false;
+});
+
+// Re-apply transform on image load (natural dimensions may change)
+document.getElementById('ocr-img').addEventListener('load', () => { _z=1;_tx=0;_ty=0; _applyTransform(); });
 
 // ─── VIEW TOGGLE ──────────────────────────────────────────────────────────────
 function toggleView(mode) {
