@@ -664,17 +664,17 @@ async function pdfToImage(file) {
   const pdf = await lib.getDocument({ data: buf }).promise;
   const numPages = pdf.numPages;
 
-  // Render ALL pages at 2x for OCR (each sent as separate image to Claude)
+  // Render ALL pages at 3x as PNG (no JPEG compression = sharper digits for OCR)
   const ocrPages = []; // [{b64, mime, canvas}]
   for (let i = 1; i <= numPages; i++) {
     const pg = await pdf.getPage(i);
-    const vp = pg.getViewport({ scale: 2.0 }); // 2x for OCR accuracy
+    const vp = pg.getViewport({ scale: 3.0 }); // 3x for max OCR accuracy
     const c = document.createElement('canvas');
     c.width = vp.width; c.height = vp.height;
     await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    const blob = await new Promise(r => c.toBlob(b => r(b), 'image/jpeg', 0.92));
+    const blob = await new Promise(r => c.toBlob(b => r(b), 'image/png')); // PNG = lossless
     const b64 = await b64fn(blob);
-    ocrPages.push({ b64, mime: 'image/jpeg', canvas: c });
+    ocrPages.push({ b64, mime: 'image/png', canvas: c });
   }
 
   // High-res preview for modal: all pages stacked at 3x
