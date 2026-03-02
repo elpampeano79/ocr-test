@@ -6,6 +6,7 @@
 <title>VecFleet · Alta Masiva de Choferes</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{--p:#8D33FF;--c:#41EBD4;--bg:#070912;--s:#111827;--s2:#1C2535;--bd:rgba(141,51,255,.18);--t:#F1F5F9;--tm:#64748B;--g:#22C55E;--r:#EF4444;--y:#F59E0B;--o:#F97316;}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -717,6 +718,26 @@ const b64fn = function(blob) {
   });
 };
 
+// ─── TESSERACT OCR ────────────────────────────────────────────────────────────
+let _tesseractWorker = null;
+async function getTesseractWorker() {
+  if (_tesseractWorker) return _tesseractWorker;
+  log('Inicializando Tesseract.js (primera vez)…');
+  const w = await Tesseract.createWorker('por', 1, {
+    logger: m => { if (m.status === 'recognizing text') log(`Tesseract: ${Math.round(m.progress*100)}%`); }
+  });
+  _tesseractWorker = w;
+  log('Tesseract.js listo ✓');
+  return w;
+}
+
+// Run Tesseract OCR on a canvas and return raw text
+async function runTesseract(canvas) {
+  const worker = await getTesseractWorker();
+  const { data } = await worker.recognize(canvas);
+  return data.text;
+}
+
 async function imageToCanvas(file) {
   return new Promise(res => {
     const img = new Image();
@@ -831,24 +852,37 @@ function b64(blob) {
 async function processFile(file) {
   log('Procesando: ' + file.name);
   let imageContents = [], previewUrl, pageCanvas = null, isPdf = false;
+  let ocrCanvases = []; // canvases for Tesseract
 
   if (file.type === 'application/pdf') {
     const pdfData = await pdfToImage(file);
-    // Send ALL pages as separate images to Claude
     imageContents = pdfData.ocrPages.map(p => ({ b64: p.b64, mime: p.mime }));
+    ocrCanvases = pdfData.ocrPages.map(p => p.canvas);
     previewUrl = pdfData.previewBlobUrl;
     pageCanvas = pdfData.page1Canvas;
     isPdf = true;
-    log(`PDF: ${imageContents.length} página(s) enviadas a OCR`);
+    log(`PDF: ${imageContents.length} página(s)`);
   } else {
     const imgB64 = await b64(file);
     const mime = file.type || 'image/jpeg';
     imageContents = [{ b64: imgB64, mime }];
     previewUrl = URL.createObjectURL(file);
     pageCanvas = await imageToCanvas(file);
+    ocrCanvases = [pageCanvas];
   }
 
-  const result = await callClaude(imageContents);
+  // Step 1: Run Tesseract OCR to extract raw text (accurate character reading)
+  log('Tesseract OCR…');
+  let tesseractTexts = [];
+  for (let i = 0; i < ocrCanvases.length; i++) {
+    const txt = await runTesseract(ocrCanvases[i]);
+    tesseractTexts.push(txt);
+    if (txt.trim()) log(`Tesseract pág ${i+1}: ${txt.substring(0, 120).replace(/\n/g, ' | ')}…`);
+  }
+  const fullText = tesseractTexts.join('\n--- PÁGINA ---\n');
+
+  // Step 2: Send Tesseract text + images to Claude for structured extraction
+  const result = await callClaude(imageContents, fullText);
   if (!result) return;
 
   const cpfDisplay = result.cpf || '?';
@@ -866,18 +900,26 @@ async function processFile(file) {
 }
 
 // ─── CLAUDE API ───────────────────────────────────────────────────────────────
-function buildOcrPrompt(retryHint) {
+function buildOcrPrompt(tesseractText, retryHint) {
   const today = new Date().toISOString().split('T')[0];
-  let p = `Sos un motor OCR de alta precisión para documentos de habilitación de conductores en Brasil.
-Analizá la(s) imagen(es) y clasificá el tipo de documento. La fecha de hoy es ${today}.
+  let p = `Sos un motor de extracción de datos para documentos de habilitación de conductores en Brasil.
+La fecha de hoy es ${today}.
+
+IMPORTANTE: Se te proporcionan DOS fuentes de información:
+1. La(s) imagen(es) del documento — usá esto para entender la ESTRUCTURA y el TIPO de documento.
+2. El texto extraído por Tesseract OCR — usá esto como FUENTE PRIMARIA para los valores numéricos (CPF, fechas, Nº Registro).
+   Tesseract es más preciso que la visión para leer dígitos individuales. Si hay discrepancia entre lo que ves en la imagen y el texto de Tesseract, PRIORIZÁ el texto de Tesseract para campos numéricos.
+
+TEXTO EXTRAÍDO POR TESSERACT:
+"""
+${tesseractText}
+"""
 
 TIPOS POSIBLES:
 1. CNH (Carteira Nacional de Habilitação) — licencia de conducir brasileña
 2. TOXICOLOGY — Laudo de Análise Toxicológica
 3. TRAINING — Certificado de curso de direção segura / defensiva (SEST SENAT u otro)
 4. UNKNOWN — cualquier otro documento
-
-Si el PDF tiene múltiples páginas, buscá la que contiene los datos del conductor (nombre, CPF, etc).
 
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
@@ -887,7 +929,7 @@ Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
 
 Reglas:
-- CPF: CRÍTICO — leé cada dígito con máxima atención. Formato: "123.456.789-09". El CPF brasileño tiene 11 dígitos con 2 dígitos verificadores al final.
+- CPF: Buscá en el texto de Tesseract un patrón de 11 dígitos (XXX.XXX.XXX-XX). El CPF brasileño tiene dígitos verificadores — si ves "4d CPF" en el texto, el valor que sigue es el CPF.
 - Fechas en formato YYYY-MM-DD
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
@@ -896,7 +938,7 @@ Reglas:
 - name: NOMBRE COMPLETO como aparece en el documento, en MAYÚSCULAS`;
 
   if (retryHint) {
-    p += `\n\n⚠ CORRECCIÓN REQUERIDA: ${retryHint}\nRevisá la imagen con extremo cuidado, dígito por dígito.`;
+    p += `\n\n⚠ CORRECCIÓN REQUERIDA: ${retryHint}`;
   }
   return p;
 }
@@ -943,9 +985,9 @@ async function callClaudeRaw(imageContents, promptText) {
 }
 
 // OCR with CPF validation + automatic retry
-async function callClaude(imageContents) {
-  // Attempt 1: normal OCR
-  const prompt1 = buildOcrPrompt(null);
+async function callClaude(imageContents, tesseractText) {
+  // Attempt 1: Tesseract text + image → Claude structures the data
+  const prompt1 = buildOcrPrompt(tesseractText || '(no disponible)', null);
   let result = await callClaudeRaw(imageContents, prompt1);
   if (!result) return null;
 
@@ -953,10 +995,10 @@ async function callClaude(imageContents) {
   const cpfRaw = normalizeCpf(result.cpf);
   if (cpfRaw && !isValidCpf(cpfRaw)) {
     log(`⚠ CPF ${cpfRaw} INVÁLIDO (check-digit fail) — reintentando OCR…`);
-    toast(`CPF ${cpfRaw} falla validación — releyendo documento…`, 'warn');
-    // Attempt 2: retry with explicit correction hint
-    const hint = `El CPF que leíste la vez anterior fue "${result.cpf}" pero NO pasa la validación de dígitos verificadores del CPF brasileño. Releé el campo "4d CPF" del documento con extremo cuidado, dígito por dígito. Asegurate de no confundir: 3↔8, 5↔6, 1↔7, 0↔8.`;
-    const prompt2 = buildOcrPrompt(hint);
+    toast(`CPF ${cpfRaw} falla validación — releyendo…`, 'warn');
+    // Attempt 2: retry with hint + same Tesseract text
+    const hint = `El CPF "${result.cpf}" NO pasa validación de check-digit. Buscá en el texto de Tesseract TODOS los patrones que parezcan CPF (11 dígitos, formato XXX.XXX.XXX-XX) y elegí el que pase la validación de dígitos verificadores.`;
+    const prompt2 = buildOcrPrompt(tesseractText || '(no disponible)', hint);
     const result2 = await callClaudeRaw(imageContents, prompt2);
     if (result2) {
       const cpf2 = normalizeCpf(result2.cpf);
