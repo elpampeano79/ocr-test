@@ -662,50 +662,60 @@ async function pdfToImage(file) {
   lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const buf = await file.arrayBuffer();
   const pdf = await lib.getDocument({ data: buf }).promise;
-
-  // Page 1 canvas → used for OCR (send to Claude) + face detection
-  const page1 = await pdf.getPage(1);
-  const vp1 = page1.getViewport({ scale: 1.8 });
-  const canvas = document.createElement('canvas');
-  canvas.width = vp1.width; canvas.height = vp1.height;
-  await page1.render({ canvasContext: canvas.getContext('2d'), viewport: vp1 }).promise;
-
-  // All-pages preview → stacked vertically at 3x (higher res than OCR) for the verification modal
   const numPages = pdf.numPages;
-  let totalH = 0, pageCanvases = [];
+
+  // Render ALL pages at 2x for OCR (each sent as separate image to Claude)
+  const ocrPages = []; // [{b64, mime, canvas}]
   for (let i = 1; i <= numPages; i++) {
     const pg = await pdf.getPage(i);
-    const vp = pg.getViewport({ scale: 3.0 }); // 3x for sharp zoom in modal
+    const vp = pg.getViewport({ scale: 2.0 }); // 2x for OCR accuracy
     const c = document.createElement('canvas');
     c.width = vp.width; c.height = vp.height;
     await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    pageCanvases.push(c);
-    totalH += vp.height + (i < numPages ? 16 : 0); // 16px gap between pages
+    const blob = await new Promise(r => c.toBlob(b => r(b), 'image/jpeg', 0.92));
+    const b64 = await b64fn(blob);
+    ocrPages.push({ b64, mime: 'image/jpeg', canvas: c });
+  }
+
+  // High-res preview for modal: all pages stacked at 3x
+  let totalH = 0;
+  const previewCanvases = [];
+  for (let i = 1; i <= numPages; i++) {
+    const pg = await pdf.getPage(i);
+    const vp = pg.getViewport({ scale: 3.0 });
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    previewCanvases.push(c);
+    totalH += vp.height + (i < numPages ? 16 : 0);
   }
   const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = pageCanvases[0].width;
+  previewCanvas.width = previewCanvases[0].width;
   previewCanvas.height = totalH;
   const ctx = previewCanvas.getContext('2d');
   ctx.fillStyle = '#1a1f2e';
   ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   let y = 0;
-  for (const pc of pageCanvases) {
-    ctx.drawImage(pc, 0, y);
-    y += pc.height + 16;
-  }
-  // Use blob URL instead of data URI — avoids browser choking on huge base64 strings
+  for (const pc of previewCanvases) { ctx.drawImage(pc, 0, y); y += pc.height + 16; }
   const previewBlobUrl = await new Promise(r =>
     previewCanvas.toBlob(b => r(URL.createObjectURL(b)), 'image/jpeg', 0.92)
   );
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
   return {
-    dataUrl,         // page 1 only — for OCR (sent to Claude)
-    previewDataUrl: previewBlobUrl, // blob URL of all pages — for modal preview
-    canvas,
-    blob: await new Promise(r => canvas.toBlob(b => r(b), 'image/jpeg', 0.92))
+    ocrPages,        // all pages at 2x — each sent to Claude as separate image
+    previewBlobUrl,  // blob URL of all pages stacked at 3x — for modal
+    page1Canvas: ocrPages[0].canvas  // page 1 canvas for face detection
   };
 }
+// Alias for b64 function used inside pdfToImage
+const b64fn = function(blob) {
+  return new Promise((r, j) => {
+    const rd = new FileReader();
+    rd.onload = () => r(rd.result.split(',')[1]);
+    rd.onerror = j;
+    rd.readAsDataURL(blob);
+  });
+};
 
 async function imageToCanvas(file) {
   return new Promise(res => {
@@ -820,28 +830,32 @@ function b64(blob) {
 // ─── PROCESS FILE ─────────────────────────────────────────────────────────────
 async function processFile(file) {
   log('Procesando: ' + file.name);
-  let imageB64, mimeType, previewUrl, pageCanvas = null, isPdf = false;
+  let imageContents = [], previewUrl, pageCanvas = null, isPdf = false;
 
   if (file.type === 'application/pdf') {
-    const { dataUrl, previewDataUrl, blob, canvas } = await pdfToImage(file);
-    imageB64 = await b64(blob);
-    mimeType = 'image/jpeg';
-    previewUrl = previewDataUrl; // all pages stacked for modal; dataUrl (pg1) used for OCR
-    pageCanvas = canvas;
+    const pdfData = await pdfToImage(file);
+    // Send ALL pages as separate images to Claude
+    imageContents = pdfData.ocrPages.map(p => ({ b64: p.b64, mime: p.mime }));
+    previewUrl = pdfData.previewBlobUrl;
+    pageCanvas = pdfData.page1Canvas;
     isPdf = true;
+    log(`PDF: ${imageContents.length} página(s) enviadas a OCR`);
   } else {
-    imageB64 = await b64(file);
-    mimeType = file.type || 'image/jpeg';
+    const imgB64 = await b64(file);
+    const mime = file.type || 'image/jpeg';
+    imageContents = [{ b64: imgB64, mime }];
     previewUrl = URL.createObjectURL(file);
     pageCanvas = await imageToCanvas(file);
   }
 
-  const result = await callClaude(imageB64, mimeType);
+  const result = await callClaude(imageContents);
   if (!result) return;
 
-  log('Resultado: ' + result.type + ' — ' + (result.name || '?') + ' CPF:' + (result.cpf || '?'));
+  const cpfDisplay = result.cpf || '?';
+  const validated = result._cpfValidated ? ' ✓ válido' : (result._cpfInvalid ? ' ⚠ check-digit INVÁLIDO' : '');
+  log('Resultado: ' + result.type + ' — ' + (result.name || '?') + ' CPF:' + cpfDisplay + validated);
 
-  // For CNH, detect and crop the face photo using ML (face-api.js)
+  // For CNH, detect and crop the face photo
   let facePhoto = null;
   if (result.type === 'CNH' && pageCanvas) {
     log('Detectando cara...');
@@ -852,16 +866,18 @@ async function processFile(file) {
 }
 
 // ─── CLAUDE API ───────────────────────────────────────────────────────────────
-async function callClaude(imageB64, mimeType) {
+function buildOcrPrompt(retryHint) {
   const today = new Date().toISOString().split('T')[0];
-  const prompt = `Sos un motor OCR para documentos de habilitación de conductores en Brasil.
-Analizá la imagen y clasificá el tipo de documento. La fecha de hoy es ${today}.
+  let p = `Sos un motor OCR de alta precisión para documentos de habilitación de conductores en Brasil.
+Analizá la(s) imagen(es) y clasificá el tipo de documento. La fecha de hoy es ${today}.
 
 TIPOS POSIBLES:
 1. CNH (Carteira Nacional de Habilitação) — licencia de conducir brasileña
 2. TOXICOLOGY — Laudo de Análise Toxicológica
 3. TRAINING — Certificado de curso de direção segura / defensiva (SEST SENAT u otro)
 4. UNKNOWN — cualquier otro documento
+
+Si el PDF tiene múltiples páginas, buscá la que contiene los datos del conductor (nombre, CPF, etc).
 
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
@@ -871,34 +887,44 @@ Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
 
 Reglas:
-- CPF: solo los números con puntos y guión (ej: "044.829.105-38") o null
+- CPF: CRÍTICO — leé cada dígito con máxima atención. Formato: "123.456.789-09". El CPF brasileño tiene 11 dígitos con 2 dígitos verificadores al final.
 - Fechas en formato YYYY-MM-DD
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
-- registro CNH: Nº Registro (Renach) que aparece en la CNH — solo dígitos, sin puntos ni espacios, o null
-- null para campos no visibles`;
+- registro CNH: Nº Registro (Renach) — solo dígitos, sin puntos ni espacios, o null
+- null para campos no visibles
+- name: NOMBRE COMPLETO como aparece en el documento, en MAYÚSCULAS`;
+
+  if (retryHint) {
+    p += `\n\n⚠ CORRECCIÓN REQUERIDA: ${retryHint}\nRevisá la imagen con extremo cuidado, dígito por dígito.`;
+  }
+  return p;
+}
+
+// Send one or more images to Claude API with rate-limit retry
+async function callClaudeRaw(imageContents, promptText) {
+  const content = [];
+  for (const img of imageContents) {
+    content.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.b64 } });
+  }
+  content.push({ type: 'text', text: promptText });
 
   const body = JSON.stringify({
     model: MDL, max_tokens: 600,
-    messages: [{ role: 'user', content: [
-      { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageB64 } },
-      { type: 'text', text: prompt }
-    ]}]
+    messages: [{ role: 'user', content }]
   });
   const headers = {
     'x-api-key': K, 'anthropic-version': '2023-06-01',
     'content-type': 'application/json',
     'anthropic-dangerous-direct-browser-access': 'true'
   };
-  // Retry up to 5 times on 429 — respects retry-after header (Anthropic resets every ~60s)
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const resp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body });
       if (resp.status === 429) {
         if (attempt >= 4) { log('Rate limit: máximo de reintentos alcanzado'); return null; }
-        // Respect the retry-after header; fall back to 65s if not present
         const retryAfter = parseInt(resp.headers.get('retry-after') || '65', 10);
-        const waitSec = Math.max(retryAfter, 15); // always wait at least 15s
+        const waitSec = Math.max(retryAfter, 15);
         log(`⏳ Rate limit — reintentando en ${waitSec}s (intento ${attempt+1}/5)…`);
         await new Promise(r => setTimeout(r, waitSec * 1000));
         continue;
@@ -914,6 +940,46 @@ Reglas:
     }
   }
   return null;
+}
+
+// OCR with CPF validation + automatic retry
+async function callClaude(imageContents) {
+  // Attempt 1: normal OCR
+  const prompt1 = buildOcrPrompt(null);
+  let result = await callClaudeRaw(imageContents, prompt1);
+  if (!result) return null;
+
+  // Validate CPF if present
+  const cpfRaw = normalizeCpf(result.cpf);
+  if (cpfRaw && !isValidCpf(cpfRaw)) {
+    log(`⚠ CPF ${cpfRaw} INVÁLIDO (check-digit fail) — reintentando OCR…`);
+    toast(`CPF ${cpfRaw} falla validación — releyendo documento…`, 'warn');
+    // Attempt 2: retry with explicit correction hint
+    const hint = `El CPF que leíste la vez anterior fue "${result.cpf}" pero NO pasa la validación de dígitos verificadores del CPF brasileño. Releé el campo "4d CPF" del documento con extremo cuidado, dígito por dígito. Asegurate de no confundir: 3↔8, 5↔6, 1↔7, 0↔8.`;
+    const prompt2 = buildOcrPrompt(hint);
+    const result2 = await callClaudeRaw(imageContents, prompt2);
+    if (result2) {
+      const cpf2 = normalizeCpf(result2.cpf);
+      if (cpf2 && isValidCpf(cpf2)) {
+        log(`✓ CPF corregido: ${cpf2} (válido)`);
+        result2._cpfValidated = true;
+        return result2;
+      } else {
+        log(`⚠ CPF ${cpf2 || '?'} sigue inválido después de retry`);
+        // Return best attempt but flagged
+        (result2 || result)._cpfInvalid = true;
+        return result2 || result;
+      }
+    }
+    result._cpfInvalid = true;
+    return result;
+  }
+
+  if (cpfRaw) {
+    log(`✓ CPF ${cpfRaw} válido (check-digit OK)`);
+    result._cpfValidated = true;
+  }
+  return result;
 }
 
 // ─── APPLY RESULT TO DRIVER ───────────────────────────────────────────────────
@@ -1018,6 +1084,11 @@ function applyResult(result, previewUrl, facePhoto) {
     }
   }
 
+  // Flag invalid CPF on the card
+  if (result._cpfInvalid && driver.el) {
+    driver.el.classList.add('cpf-collision');
+  }
+
   updateCard(cpf);
   updateStats();
 }
@@ -1027,6 +1098,22 @@ function normalizeCpf(cpf) {
   const nums = cpf.replace(/\D/g, '');
   if (nums.length !== 11) return null;
   return nums.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+// Brazilian CPF check-digit validation — catches OCR errors on any single digit
+function isValidCpf(cpf) {
+  if (!cpf) return false;
+  const d = cpf.replace(/\D/g, '');
+  if (d.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(d)) return false; // reject 111.111.111-11 etc
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(d[i]) * (10 - i);
+  let c1 = 11 - (sum % 11); if (c1 >= 10) c1 = 0;
+  if (parseInt(d[9]) !== c1) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(d[i]) * (11 - i);
+  let c2 = 11 - (sum % 11); if (c2 >= 10) c2 = 0;
+  return parseInt(d[10]) === c2;
 }
 
 // ─── VALIDATION ───────────────────────────────────────────────────────────────
@@ -1361,7 +1448,9 @@ async function uploadSelected() {
 const DOC_META = {
   cnh:   { label: '🪪 CNH / Licencia de Conducir', fields: [
     { key: 'name',         lbl: 'Nombre' },
-    { key: 'cpf',          lbl: 'CPF' },
+    { key: 'cpf',          lbl: 'CPF',
+      style: d => isValidCpf(d.cpf) ? 'ok' : 'err',
+      fmt: v => { const valid = isValidCpf(v); return v + (valid ? ' ✓' : ' ⚠ INVÁLIDO'); } },
     { key: 'registro',     lbl: 'Nº Registro' },
     { key: 'dob',          lbl: 'Fecha nacimiento' },
     { key: 'validity',     lbl: 'Vencimiento',  style: d => d.status === 'VALID' ? 'ok' : 'err' },
@@ -1372,7 +1461,9 @@ const DOC_META = {
   ]},
   tox:   { label: '🔬 Laudo Toxicológico', fields: [
     { key: 'name',            lbl: 'Nombre' },
-    { key: 'cpf',             lbl: 'CPF' },
+    { key: 'cpf',             lbl: 'CPF',
+      style: d => isValidCpf(d.cpf) ? 'ok' : 'err',
+      fmt: v => { const valid = isValidCpf(v); return v + (valid ? ' ✓' : ' ⚠ INVÁLIDO'); } },
     { key: 'lab',             lbl: 'Laboratorio' },
     { key: 'collection_date', lbl: 'Fecha colección' },
     { key: 'validity_date',   lbl: 'Vencimiento', style: d => d.is_valid ? 'ok' : 'warn' },
@@ -1383,7 +1474,9 @@ const DOC_META = {
   ]},
   train: { label: '🎓 Certificado de Entrenamiento', fields: [
     { key: 'name',            lbl: 'Nombre' },
-    { key: 'cpf',             lbl: 'CPF' },
+    { key: 'cpf',             lbl: 'CPF',
+      style: d => isValidCpf(d.cpf) ? 'ok' : 'err',
+      fmt: v => { const valid = isValidCpf(v); return v + (valid ? ' ✓' : ' ⚠ INVÁLIDO'); } },
     { key: 'institution',     lbl: 'Institución' },
     { key: 'course',          lbl: 'Curso' },
     { key: 'completion_date', lbl: 'Fecha realización' },
