@@ -693,12 +693,15 @@ async function pdfToImage(file) {
     ctx.drawImage(pc, 0, y);
     y += pc.height + 16;
   }
-  const previewDataUrl = previewCanvas.toDataURL('image/jpeg', 0.92);
+  // Use blob URL instead of data URI — avoids browser choking on huge base64 strings
+  const previewBlobUrl = await new Promise(r =>
+    previewCanvas.toBlob(b => r(URL.createObjectURL(b)), 'image/jpeg', 0.92)
+  );
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
   return {
-    dataUrl,       // page 1 only — for OCR
-    previewDataUrl, // all pages stacked — for modal preview
+    dataUrl,         // page 1 only — for OCR (sent to Claude)
+    previewDataUrl: previewBlobUrl, // blob URL of all pages — for modal preview
     canvas,
     blob: await new Promise(r => canvas.toBlob(b => r(b), 'image/jpeg', 0.92))
   };
@@ -1450,12 +1453,15 @@ let _dragging = false, _dx = 0, _dy = 0;
 function _applyTransform() {
   const img = document.getElementById('ocr-img');
   if (!img) return;
-  // Center the image in its container, then apply scale + pan offset
   const wrap = document.getElementById('ocr-zoom-wrap');
   const ww = wrap.clientWidth, wh = wrap.clientHeight;
-  const iw = img.naturalWidth || img.clientWidth;
-  const ih = img.naturalHeight || img.clientHeight;
-  // Fit-to-container base scale
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  // Retry automatically if modal not yet laid out OR image not yet loaded
+  if (!ww || !wh || !iw || !ih) {
+    requestAnimationFrame(_applyTransform);
+    return;
+  }
   const baseScale = Math.min(ww / iw, wh / ih, 1);
   const scale = baseScale * _z;
   const cx = (ww - iw * scale) / 2;
@@ -1529,8 +1535,8 @@ document.getElementById('ocr-zoom-wrap').addEventListener('touchend', () => {
   _lastTouchDist = null; _dragging = false;
 });
 
-// Re-apply transform on image load (natural dimensions may change)
-document.getElementById('ocr-img').addEventListener('load', () => { _z=1;_tx=0;_ty=0; _applyTransform(); });
+// Re-apply transform on image load — _applyTransform will self-retry until modal is visible
+document.getElementById('ocr-img').addEventListener('load', () => { _z=1;_tx=0;_ty=0; requestAnimationFrame(_applyTransform); });
 
 // ─── VIEW TOGGLE ──────────────────────────────────────────────────────────────
 function toggleView(mode) {
