@@ -923,14 +923,24 @@ TIPOS POSIBLES:
 
 Devolvé ÚNICAMENTE JSON válido sin texto adicional:
 
-Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","validity":"","category":"","issuer_state":"","registro":"","status":"VALID_OR_EXPIRED"}
+Para CNH: {"type":"CNH","name":"","cpf":"","dob":"","emission":"","validity":"","category":"","issuer_state":"","registro":"","status":"VALID_OR_EXPIRED"}
 Para TOXICOLOGY: {"type":"TOXICOLOGY","name":"","cpf":"","result":"NEGATIVE_OR_POSITIVE","validity_date":"","collection_date":"","lab":"","is_valid":true}
 Para TRAINING: {"type":"TRAINING","name":"","cpf":"","course":"","institution":"","completion_date":""}
 Para UNKNOWN: {"type":"UNKNOWN","detected":"descripcion breve"}
 
 Reglas:
 - CPF: Buscá en el texto de Tesseract un patrón de 11 dígitos (XXX.XXX.XXX-XX). El CPF brasileño tiene dígitos verificadores — si ves "4d CPF" en el texto, el valor que sigue es el CPF.
-- Fechas en formato YYYY-MM-DD
+
+⚠ FECHAS — MUY IMPORTANTE:
+- Los documentos brasileños usan formato DD/MM/AAAA. Ejemplo: "01/02/2035" significa 1 de febrero de 2035.
+- Buscá en el texto de Tesseract los patrones de fecha (DD/MM/AAAA). Extraé CADA DÍGITO con cuidado — especialmente el año (los 4 últimos dígitos).
+- Convertí las fechas al formato de salida YYYY-MM-DD. Ejemplo: "01/02/2035" → "2035-02-01", "12/02/2025" → "2025-02-12".
+- Para CNH, el campo "Validade" (validity) suele estar en el frente de la CNH. En CNHs brasileñas, la validez es SIEMPRE posterior a la emisión (típicamente 5 a 10 años después).
+- emission = fecha de "1ª Habilitação" o "Data de Emissão" — cuándo se emitió la CNH.
+- validity = fecha de "Validade" — cuándo VENCE la CNH. Siempre > emission.
+- VERIFICÁ: si validity ≤ emission, hay un error de lectura. Volvé a leer los dígitos del año con cuidado.
+- Para toxicología, "validity_date" suele ser 60 o 90 días después de "collection_date".
+
 - status CNH: "VALID" si validity > ${today}, "EXPIRED" si no
 - is_valid toxicología: true si resultado final es negativo (Não Detectado) y validity_date > ${today}
 - registro CNH: Nº Registro (Renach) — solo dígitos, sin puntos ni espacios, o null
@@ -1021,6 +1031,41 @@ async function callClaude(imageContents, tesseractText) {
     log(`✓ CPF ${cpfRaw} válido (check-digit OK)`);
     result._cpfValidated = true;
   }
+
+  // Validate dates
+  const dateCheck = result.type === 'CNH' ? validateCnhDates(result)
+                  : result.type === 'TOXICOLOGY' ? validateToxDates(result)
+                  : { ok: true };
+
+  if (!dateCheck.ok) {
+    log(`⚠ Fecha sospechosa: ${dateCheck.issue} — reintentando OCR…`);
+    toast(`Fecha sospechosa — releyendo…`, 'warn');
+    const dateHint = `⚠ CORRECCIÓN DE FECHAS: ${dateCheck.issue}\n` +
+      `Los documentos brasileños usan DD/MM/AAAA. Buscá en el texto de Tesseract TODOS los patrones de fecha y releé CADA DÍGITO, especialmente los 4 dígitos del AÑO. ` +
+      `No confundas dígitos similares como 2↔3, 5↔6, 0↔8. ` +
+      `Para CNH: "Validade" es la fecha de VENCIMIENTO (siempre 5-10 años después de la emisión).`;
+    const prompt3 = buildOcrPrompt(tesseractText || '(no disponible)', dateHint);
+    const result3 = await callClaudeRaw(imageContents, prompt3);
+    if (result3) {
+      const recheck = result3.type === 'CNH' ? validateCnhDates(result3)
+                    : result3.type === 'TOXICOLOGY' ? validateToxDates(result3)
+                    : { ok: true };
+      if (recheck.ok) {
+        log(`✓ Fechas corregidas: validity=${result3.validity || result3.validity_date}`);
+        // Preserve CPF validation status
+        if (result._cpfValidated) result3._cpfValidated = true;
+        if (result._cpfInvalid) result3._cpfInvalid = true;
+        return result3;
+      } else {
+        log(`⚠ Fechas siguen sospechosas después de retry: ${recheck.issue}`);
+        result3._dateWarning = recheck.issue;
+        if (result._cpfValidated) result3._cpfValidated = true;
+        if (result._cpfInvalid) result3._cpfInvalid = true;
+        return result3;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -1156,6 +1201,67 @@ function isValidCpf(cpf) {
   for (let i = 0; i < 10; i++) sum += parseInt(d[i]) * (11 - i);
   let c2 = 11 - (sum % 11); if (c2 >= 10) c2 = 0;
   return parseInt(d[10]) === c2;
+}
+
+// ─── DATE VALIDATION ──────────────────────────────────────────────────────────
+function validateCnhDates(result) {
+  // Returns { ok: true } or { ok: false, issue: 'description' }
+  if (!result || result.type !== 'CNH') return { ok: true };
+  const validity = result.validity;
+  const emission = result.emission;
+  const dob = result.dob;
+  if (!validity) return { ok: true }; // can't validate if missing
+
+  // Check validity is a real date
+  const vDate = new Date(validity + 'T00:00:00');
+  if (isNaN(vDate.getTime())) return { ok: false, issue: `validity "${validity}" no es una fecha válida` };
+
+  // Check emission if present
+  if (emission) {
+    const eDate = new Date(emission + 'T00:00:00');
+    if (!isNaN(eDate.getTime())) {
+      // Validity must be AFTER emission
+      if (vDate <= eDate) {
+        return { ok: false, issue: `validity (${validity}) ≤ emission (${emission}). La fecha de vencimiento debe ser POSTERIOR a la emisión.` };
+      }
+      // CNH validity is typically 5-10 years after emission
+      const diffYears = (vDate - eDate) / (365.25 * 24 * 3600 * 1000);
+      if (diffYears > 15 || diffYears < 1) {
+        return { ok: false, issue: `Diferencia emission→validity = ${diffYears.toFixed(1)} años (lo normal son 5-10 años). Verificá los dígitos del año.` };
+      }
+    }
+  }
+
+  // Check dob if present — validity should be well after birth
+  if (dob) {
+    const bDate = new Date(dob + 'T00:00:00');
+    if (!isNaN(bDate.getTime())) {
+      const age = (vDate - bDate) / (365.25 * 24 * 3600 * 1000);
+      if (age < 18) {
+        return { ok: false, issue: `validity sugiere que el conductor tiene menos de 18 años al vencimiento. Verificá año de validity.` };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+function validateToxDates(result) {
+  if (!result || result.type !== 'TOXICOLOGY') return { ok: true };
+  const vd = result.validity_date;
+  const cd = result.collection_date;
+  if (!vd || !cd) return { ok: true };
+  const vDate = new Date(vd + 'T00:00:00');
+  const cDate = new Date(cd + 'T00:00:00');
+  if (isNaN(vDate.getTime()) || isNaN(cDate.getTime())) return { ok: true };
+  if (vDate <= cDate) {
+    return { ok: false, issue: `validity_date (${vd}) ≤ collection_date (${cd}). La validez debe ser posterior a la colección.` };
+  }
+  const diffDays = (vDate - cDate) / (24 * 3600 * 1000);
+  if (diffDays > 365) {
+    return { ok: false, issue: `Diferencia collection→validity = ${diffDays} días (lo normal son 60-90 días). Verificá las fechas.` };
+  }
+  return { ok: true };
 }
 
 // ─── VALIDATION ───────────────────────────────────────────────────────────────
@@ -1495,6 +1601,7 @@ const DOC_META = {
       fmt: v => { const valid = isValidCpf(v); return v + (valid ? ' ✓' : ' ⚠ INVÁLIDO'); } },
     { key: 'registro',     lbl: 'Nº Registro' },
     { key: 'dob',          lbl: 'Fecha nacimiento' },
+    { key: 'emission',     lbl: 'Emisión' },
     { key: 'validity',     lbl: 'Vencimiento',  style: d => d.status === 'VALID' ? 'ok' : 'err' },
     { key: 'category',     lbl: 'Categoría' },
     { key: 'issuer_state', lbl: 'Estado emisor' },
